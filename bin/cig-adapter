@@ -1,0 +1,3 @@
+#!/bin/sh
+# cig-adapter launcher — loopback OpenAI-compatible CIG shim
+exec node /usr/local/lib/installhermes/cig-adapter/server.mjs

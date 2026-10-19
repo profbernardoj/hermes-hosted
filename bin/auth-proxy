@@ -1,0 +1,8 @@
+#!/bin/sh
+# auth-proxy launcher — Privy JWT front for the hermes dashboard.
+# OPENCLAW_INTERNAL_PORT retargets the (generic) everclaw auth-proxy to the
+# hermes dashboard's loopback FastAPI server; the proxy itself is unmodified.
+export AUTH_PROXY_DIR=/usr/local/lib/installhermes/auth-proxy
+export OPENCLAW_INTERNAL_PORT=9119
+cd "$AUTH_PROXY_DIR"
+exec node server.mjs
