@@ -124,7 +124,7 @@ for _p in /opt/data /opt /tmp /run /root; do
   fi
 done
 
-# --- HERMES_HOME writability chain (v9.2) ---
+# --- HERMES_HOME writability chain (v9.2.1) ---
 # Upstream hard-requires a writable $HERMES_HOME (stage2 seeds it; the
 # dashboard writes state there). Default = /opt/data (the attached VOLUME).
 # When the backend's attach is unwritable (lease 01a15a53), fall back to the
@@ -133,23 +133,32 @@ done
 # NOTE the tradeoff: a relocated HOME does not ride the backend volume —
 # buffer containers are disposable by design (the pool replaces them), and
 # the forensics lines above make the relocation loud and diagnosable.
-if [ -z "${HERMES_HOME:-}" ]; then
-  HERMES_HOME=""
-  for _cand in /opt/data /opt/hermes-data /tmp/hermes-data /run/hermes-data; do
+# v9.2.1 fix (CI run 39466160915): the image sets ENV HERMES_HOME=/opt/data
+# (upstream Dockerfile line 461), so an UNSET-check never fires — the chain
+# must PROBE the pre-set value itself: keep it when writable, relocate when
+# the backend's attach is not.
+_hh_pref="${HERMES_HOME:-/opt/data}"
+HERMES_HOME=""
+if mkdir -p "$_hh_pref" 2>/dev/null && touch "$_hh_pref/.installhermes-wtest" 2>/dev/null; then
+  rm -f "$_hh_pref/.installhermes-wtest"
+  HERMES_HOME="$_hh_pref"
+else
+  for _cand in /opt/hermes-data /tmp/hermes-data /run/hermes-data; do
     if mkdir -p "$_cand" 2>/dev/null && touch "$_cand/.installhermes-wtest" 2>/dev/null; then
       rm -f "$_cand/.installhermes-wtest"
       HERMES_HOME="$_cand"
       break
     fi
   done
-  if [ -z "$HERMES_HOME" ]; then
-    log "FATAL: no writable HERMES_HOME candidate (see forensics above) — aborting"
-    exit 115
-  fi
-  [ "$HERMES_HOME" = /opt/data ] || \
-    log "WARN: HERMES_HOME relocated to $HERMES_HOME (default /opt/data unwritable on this backend)"
-  export HERMES_HOME
 fi
+if [ -z "$HERMES_HOME" ]; then
+  log "FATAL: no writable HERMES_HOME candidate (preferred $_hh_pref; see forensics above) — aborting"
+  exit 115
+fi
+if [ "$HERMES_HOME" != "$_hh_pref" ]; then
+  log "WARN: HERMES_HOME relocated to $HERMES_HOME (preferred $_hh_pref unwritable on this backend)"
+fi
+export HERMES_HOME
 
 DROPS_ENABLED=1
 if "$S6_SETUIDGID" hermes /bin/true 2>/dev/null; then
