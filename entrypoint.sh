@@ -116,6 +116,13 @@ else
   fi
   export PATH="/usr/local/lib/installhermes/shims:$PATH"
   S6_SETUIDGID="$SHIM"
+  # The image's /opt/hermes/bin/hermes stub (docker/hermes-exec-shim.sh, FIRST on
+  # PATH) re-execs every root `hermes` CLI invocation through
+  # /command/s6-setuidgid — an ABSOLUTE path, so the PATH shim cannot intercept
+  # it (2026-10-20 CI diagnostic run 39459775620: the dashboard child died
+  # rc 111 with "s6-applyuidgid: fatal" while the PATH shim provably worked,
+  # shim-rc=0). The stub's DOCUMENTED opt-out keeps root invocations as root.
+  export HERMES_DOCKER_EXEC_AS_ROOT=1
   log "WARN: privilege drop to 'hermes' unavailable (EPERM) — DEGRADED-ROOT mode:"
   log "WARN: upstream cont-init drops and all services will run as root (everclaw/IOC fleet pattern)"
 fi

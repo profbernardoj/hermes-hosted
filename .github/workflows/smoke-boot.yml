@@ -317,8 +317,8 @@ jobs:
           docker exec smoke sh -c '/command/s6-setuidgid hermes /bin/true; echo real-rc=$?' || true
           echo "=== absolute-path s6 invocations in the install tree ==="
           docker exec smoke sh -c 'grep -rn "s6-setuidgid\|s6-applyuidgid" /opt/hermes/hermes_cli/*.py /opt/hermes/hermes_bootstrap.py 2>/dev/null | grep -v "^.*#.*s6" | head -8' || true
-          echo "=== manual dashboard foreground boot via shim (port 9120; full output) ==="
-          docker exec smoke sh -c 'export PATH=/usr/local/lib/installhermes/shims:/command:$PATH; cd /opt/data; HOME=/opt/data timeout 90 hermes dashboard --host 127.0.0.1 --port 9120 --no-open 2>&1 | head -80; echo boot-rc=$?' || true
+          echo "=== manual dashboard foreground boot via shim + exec-as-root opt-out (port 9120; full output) ==="
+          docker exec smoke sh -c 'export PATH=/usr/local/lib/installhermes/shims:/command:$PATH; export HERMES_DOCKER_EXEC_AS_ROOT=1; cd /opt/data; HOME=/opt/data timeout 90 hermes dashboard --host 127.0.0.1 --port 9120 --no-open > /tmp/dashboot.log 2>&1; echo boot-rc=$?; head -80 /tmp/dashboot.log' || true
 
       - name: Always dump logs (failure or success)
         if: always()
