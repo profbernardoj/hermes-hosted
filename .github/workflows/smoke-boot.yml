@@ -53,9 +53,17 @@ jobs:
           echo "image=ghcr.io/${{ github.repository }}:$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Run container with buffer-manifest env shape
+        # v8 Fred-parity gate: Fred's tenant sandbox denies exec of files under
+        # /run (5/5 leases 2026-10-20: s6 stage0 "exec: /run/s6/basedir/bin/init:
+        # Permission denied", exit 126). --tmpfs /run:rw,noexec reproduces that
+        # condition on the runner: any image that executes from /run FAILS this
+        # gate. s6-overlay v3 CANNOT pass it (stage0 generates + execs its init
+        # from /run/s6/basedir at boot). The v8 entrypoint must boot with zero
+        # exec-from-/run.
         run: |
           docker rm -f smoke 2>/dev/null || true
           docker run -d --name smoke -p 18789:18789 \
+            --tmpfs /run:rw,noexec,size=64m \
             -e PRIVY_APP_ID=cl-smoke-installhermes-not-real \
             -e PRIVY_VERIFICATION_KEY=MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEeF3cphhczAWSVDSNDib+kjVWSz0V2WEC5mn4EdRzdn8Jti3bhQMNaM422u9wSMLrQOr/ez2dBtjhiLirG7Gexw== \
             -e OPENCLAW_OWNER_ID=buffer-unassigned \
@@ -114,10 +122,20 @@ jobs:
           DCODE=$(docker exec smoke curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:9119/ || echo fail)
           echo "dashboard: $DCODE"
           if [ "$DCODE" != "200" ]; then exit 1; fi
-          echo "=== api_server :8642 via exec (key-gated — any HTTP code = listening) ==="
-          ACODE=$(docker exec smoke curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8642/ || echo fail)
-          echo "api_server: $ACODE (listening if not 000/fail)"
-          if [ "$ACODE" = "000" ] || [ "$ACODE" = "fail" ]; then exit 1; fi
+          echo "=== api_server :8642 via exec (v8: NO gateway process — expect NOT listening) ==="
+          # v7 note: this assertion was VACUOUS before — `curl ... || echo fail`
+          # concatenated "000"+"fail" into "000fail", which matched neither the
+          # 000 nor the fail branch, so it passed while nothing listened.
+          # v8 runs no gateway (upstream `gateway run` exits without channels;
+          # the dashboard provides the product chat surface), so :8642 must be
+          # CLOSED. If a future version enables the gateway api_server, update
+          # this assertion to require a listener — deliberately, not by drift.
+          ACODE=$(docker exec smoke curl -s -o /dev/null -w "%{http_code}" --max-time 5 http://127.0.0.1:8642/ 2>/dev/null) || ACODE=000
+          echo "api_server: $ACODE (000 = not listening = expected in v8)"
+          if [ "$ACODE" != "000" ]; then
+            echo "UNEXPECTED listener on :8642 — no gateway is expected in v8"
+            exit 1
+          fi
           echo "=== cig-adapter :18900 via exec (expect 200 on /healthz) ==="
           CCODE=$(docker exec smoke curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:18900/healthz || echo fail)
           echo "cig-adapter: $CCODE"
