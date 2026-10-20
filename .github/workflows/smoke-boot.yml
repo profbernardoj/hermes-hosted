@@ -18,11 +18,19 @@ on:
         description: "Image tag to smoke (empty = latest)"
         required: false
         default: ""
-  push:
-    branches: [main]
+  # Run AFTER docker-build completes (push path) — NOT on push directly.
+  # On push, this job would pull :latest before the concurrent build has
+  # pushed it, smoking the STALE image (v6 push run tested v5 that way).
+  # workflow_run fires once the build has actually pushed, so latest is
+  # fresh. Guarded to successful push-event builds only (PR builds don't
+  # push images).
+  workflow_run:
+    workflows: ["docker-build"]
+    types: [completed]
 
 jobs:
   smoke:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -98,7 +106,7 @@ jobs:
         run: |
           set -e
           echo "=== auth-proxy :18789 login page (expect 200) ==="
-          CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:18789/)
+          CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:18789/ || echo fail)
           echo "auth-proxy: $CODE"
           if [ "$CODE" != "200" ]; then docker logs smoke 2>&1 | tail -80; exit 1; fi
           echo "=== dashboard :9119 via exec (loopback bind, expect 200) ==="

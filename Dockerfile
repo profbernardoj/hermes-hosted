@@ -38,13 +38,27 @@ COPY cig-adapter/server.mjs /usr/local/lib/installhermes/cig-adapter/server.mjs
 COPY auth-proxy/server.mjs /usr/local/lib/installhermes/auth-proxy/server.mjs
 COPY auth-proxy/egress-probes.mjs /usr/local/lib/installhermes/auth-proxy/egress-probes.mjs
 COPY auth-proxy/login.html /usr/local/lib/installhermes/auth-proxy/login.html
+COPY auth-proxy/login-app.jsx /usr/local/lib/installhermes/auth-proxy/login-app.jsx
+COPY auth-proxy/build-login.mjs /usr/local/lib/installhermes/auth-proxy/build-login.mjs
 COPY auth-proxy/package.json /usr/local/lib/installhermes/auth-proxy/package.json
+COPY auth-proxy/package-lock.json /usr/local/lib/installhermes/auth-proxy/package-lock.json
+COPY auth-proxy/assets/ /usr/local/lib/installhermes/auth-proxy/assets/
 
-# --- Runtime deps for the auth-proxy (Node is in the base image via pm) ---
-# Pinned exact versions (supply-chain discipline, SOP-001 §6):
+# --- Auth-proxy: deps + LOGIN BUNDLE BUILD (everclaw auth-proxy-builder pattern) ---
+# The login page is a BUILD ARTIFACT: build-login.mjs (esbuild) bundles
+# login-app.jsx + React + the Privy SDK into dist/login-bundle.js, which
+# server.mjs loads at boot. Without it the auth-proxy exits (ENOENT) and
+# crash-loops — nothing ever listens on :18789 (v6 smoke catch; masked in
+# v1-v5 because the missing-PRIVY validation exited first).
+# Sequence mirrors the everclaw Dockerfile: install ALL deps
+# (--ignore-scripts skips optional native addon compilation), build the
+# bundle, then reinstall prod-only. assets/logo.png is served on the login
+# page (server.mjs:1619).
 RUN cd /usr/local/lib/installhermes/auth-proxy && \
-    npm install --omit=dev --no-audit --no-fund \
-      cookie@1.0.2 http-proxy@1.18.1 jose@6.0.10 && \
+    npm ci --ignore-scripts --no-audit --no-fund && \
+    npm run build && \
+    rm -rf node_modules && \
+    npm ci --omit=dev --no-audit --no-fund && \
     npm cache clean --force
 
 # --- s6 service definitions (the base image is s6-overlay PID 1) ---
