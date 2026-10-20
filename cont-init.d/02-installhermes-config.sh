@@ -72,9 +72,23 @@ infrastructure. Your inference runs on the Morpheus network; the user owns it.
 EOF
 fi
 
-# --- Dashboard: enable + bind loopback (the auth-proxy is the only ingress) ---
-export HERMES_DASHBOARD=1
-mkdir -p /run/installhermes
-printf 'HERMES_DASHBOARD=1\n' > /run/installhermes/env
+# --- Dashboard: ALWAYS on, ALWAYS loopback (the auth-proxy is the only ingress) ---
+# Upstream's dashboard s6 service defaults to HERMES_DASHBOARD_HOST=0.0.0.0;
+# a non-loopback bind engages the dashboard's own auth gate (basic auth /
+# Nous OAuth), which we do NOT use — our Privy auth-proxy fronts :18789 and
+# reaches the dashboard on 127.0.0.1:9119. Without these writes the dashboard
+# refuses to start (fail-closed, "Refusing to bind dashboard to 0.0.0.0") and
+# crash-loops (v5 smoke log).
+#
+# Image invariants, set here rather than in the manifest so they cannot be
+# forgotten on any deploy path (buffer, cold deploy, manual): in hermes-hosted
+# the dashboard is ALWAYS enabled and bound to loopback. Mechanism: s6's
+# container_environment dir — the same one upstream's stage2 hook writes the
+# browser path into; with-contenv services (incl. the dashboard) read it.
+# Idempotent per boot.
+mkdir -p /run/s6/container_environment
+printf '1' > /run/s6/container_environment/HERMES_DASHBOARD
+printf '127.0.0.1' > /run/s6/container_environment/HERMES_DASHBOARD_HOST
+printf '9119' > /run/s6/container_environment/HERMES_DASHBOARD_PORT
 
 echo "[installhermes] config written (model=${DEFAULT_MODEL}, agent=${AGENT_NAME})"

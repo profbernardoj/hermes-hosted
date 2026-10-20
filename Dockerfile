@@ -73,12 +73,20 @@ RUN chmod +x /usr/local/bin/cig-adapter /usr/local/bin/auth-proxy
 COPY cont-init.d/02-installhermes-config.sh /etc/cont-init.d/02-installhermes-config.sh
 RUN chmod +x /etc/cont-init.d/02-installhermes-config.sh
 
-# Headless CMD (staging fix v2): the base image's default CMD is the
-# interactive `hermes` TUI — it exits without a TTY and kills the container
-# during startup (lease 01a156ce: LEASE_STATE_REJECTED/ContainerExited).
-# `gateway run` is the official headless invocation: a supervised sleep
-# heartbeat while s6-overlay manages the actual gateway + dashboard.
-CMD ["gateway", "run"]
+# Headless main program (v6 fix): `sleep infinity` holds /init's main-program
+# slot while the s6 services (main-hermes agent, dashboard, loopback
+# api_server, cig-adapter, auth-proxy) do all the work. Bare-exec of an
+# executable is a documented upstream pattern (main-wrapper.sh: "first arg
+# is an executable → exec it directly (sleep, bash, sh, …)").
+#
+# `gateway run` (v2–v5) was WRONG: it is the MESSAGING-gateway invocation
+# (upstream docker-compose runs it for Telegram/Discord/... channel deploys).
+# With no channels configured the process exits → /init begins stage-3
+# shutdown → the container dies during startup (Fred leases 01a156ce,
+# 01a156d8, 01a1573d: LEASE_STATE_REJECTED / ContainerExited). The CI smoke's
+# 45-second window masked this — the exit lands between ~45s and Fred's
+# ~3-minute startup supervision window.
+CMD ["sleep", "infinity"]
 
 # Base image ENTRYPOINT (/init → s6) is inherited.
 # Env contract (set by provision-buffer / deploy-agent manifests):
