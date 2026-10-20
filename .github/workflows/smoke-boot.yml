@@ -129,6 +129,57 @@ jobs:
           fi
           echo "ALL SERVICE ASSERTIONS PASSED"
 
+      - name: Init-wrap probe (Fred parity — tini as PID 1, entrypoint NOT PID 1)
+        # Fred's manifest guide exposes an `init` field (tini as PID 1). If a
+        # Manifest node wraps containers that way, upstream's
+        # entrypoint-dispatch.sh takes its non-PID-1 FALLBACK path
+        # (stage2-hook.sh + main-wrapper directly, NO s6 services) — and any
+        # non-zero exit under `set -e` kills the container "during startup",
+        # which is exactly what all five rejected leases showed. This probe
+        # reproduces that runtime shape on the runner. INFORMATIONAL — it
+        # reports which path the image takes and where it fails, if it fails.
+        run: |
+          docker rm -f smoke-init 2>/dev/null || true
+          echo "=== docker run --init (tini PID 1) same env shape ==="
+          docker run -d --init --name smoke-init -p 18790:18789 \
+            -e PRIVY_APP_ID=cl-smoke-installhermes-not-real \
+            -e PRIVY_VERIFICATION_KEY=MFkwEw…xw== \
+            -e OPENCLAW_OWNER_ID=buffer-unassigned \
+            -e OPENCLAW_OWNER_EMAIL= \
+            -e OPENCLAW_OWNER_PRIVY_ID=buffer-unassigned \
+            -e VERIFY_OWNER_URL=https://example.invalid/functions/v1/verify-owner \
+            -e VERIFY_OWNER_SECRET=smoke-…real \
+            -e CONTAINER_FQDN=smoke.invalid \
+            -e HANDOFF_SIGNING_SECRET=smoke-…real \
+            -e CONSUME_HANDOFF_URL=https://example.invalid/consume \
+            -e GET_HANDOFF_SECRET_URL=https://example.invalid/get \
+            -e BRAND_NAME=Hermes \
+            -e BRAND_ICON=H \
+            -e BRAND_TAGLINE=smoke \
+            -e EVERCLAW_DEFAULT_MODEL=deepseek-v4-flash-0731 \
+            -e CIG_MINT_URL=https://example.invalid/mint \
+            -e CIG_INFERENCE_URL=https://example.invalid/infer \
+            -e CIG_BINDING_SECRET=000000…0000 \
+            -e CIG_CONTAINER_FQDN=smoke.invalid \
+            -e CIG_ALLOWED_FQDN_SUFFIX=.manifest0.net \
+            -e CIG_FAIL_CLOSED=true \
+            -e CIG_ADAPTER_KEY=smoke-…real \
+            -e HERMES_DASHBOARD=1 \
+            ${{ steps.img.outputs.image }} || true
+          for i in $(seq 1 12); do
+            sleep 20
+            STATE=$(docker inspect --format '{{.State.Status}}' smoke-init 2>/dev/null || echo gone)
+            echo "[t+$((i*20))s] smoke-init state: $STATE"
+            if [ "$STATE" != "running" ]; then break; fi
+          done
+          echo "=== smoke-init inspect ==="
+          docker inspect --format 'ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}} Error={{.State.Error}}' smoke-init 2>/dev/null || true
+          echo "=== smoke-init logs (dispatcher path / stage2 / failure point) ==="
+          docker logs smoke-init 2>&1 | head -120 || true
+
       - name: Always dump logs (failure or success)
         if: always()
-        run: docker logs smoke 2>&1 | tail -200 || true
+        run: |
+          docker logs smoke 2>&1 | tail -200 || true
+          echo "=== smoke-init final logs ==="
+          docker logs smoke-init 2>&1 | tail -80 || true
