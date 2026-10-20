@@ -39,11 +39,6 @@ COPY auth-proxy/server.mjs /usr/local/lib/installhermes/auth-proxy/server.mjs
 COPY auth-proxy/login.html /usr/local/lib/installhermes/auth-proxy/login.html
 COPY auth-proxy/package.json /usr/local/lib/installhermes/auth-proxy/package.json
 
-# --- Node on a deterministic path: s6 services run with a minimal env whose
-# PATH may not include pm's managed node. Symlink it into /usr/local/bin so
-# the auth-proxy and cig-adapter launchers resolve `node` in any context.
-RUN ln -sf "$(command -v node)" /usr/local/bin/node
-
 # --- Runtime deps for the auth-proxy (Node is in the base image via pm) ---
 # Pinned exact versions (supply-chain discipline, SOP-001 §6):
 RUN cd /usr/local/lib/installhermes/auth-proxy && \
