@@ -45,6 +45,21 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Docker daemon health (self-heal before any container run)
+        # ubuntu-latest pool roll 20261012.334 (observed 2026-10-20 15:19+ UTC)
+        # ships a docker daemon whose netns handler dies at the first
+        # container start ("bind-mount /proc/<pid>/ns/net ->
+        # /var/run/docker/netns/<id>: no such file or directory") — 4
+        # consecutive fresh runners failed identically (builds unaffected:
+        # buildkit never hits that path) while the 20261018.339 image ran
+        # clean. A daemon restart rebuilds the netns state; a no-op on
+        # healthy runners.
+        run: |
+          sudo systemctl restart docker 2>/dev/null || sudo service docker restart || true
+          sleep 5
+          docker info >/dev/null
+          echo "docker daemon: $(docker info --format '{{.ServerVersion}}') healthy"
+
       - name: Determine image
         id: img
         run: |
