@@ -25,6 +25,7 @@
 
 ARG HERMES_BASE_VERSION=v0.22.2
 FROM docker.io/nousresearch/hermes-agent:${HERMES_BASE_VERSION}
+ARG HERMES_BASE_VERSION
 
 # --- Metadata ---
 LABEL org.opencontainers.image.title="hermes-hosted"
@@ -37,6 +38,11 @@ COPY cig-adapter/server.mjs /usr/local/lib/installhermes/cig-adapter/server.mjs
 COPY auth-proxy/server.mjs /usr/local/lib/installhermes/auth-proxy/server.mjs
 COPY auth-proxy/login.html /usr/local/lib/installhermes/auth-proxy/login.html
 COPY auth-proxy/package.json /usr/local/lib/installhermes/auth-proxy/package.json
+
+# --- Node on a deterministic path: s6 services run with a minimal env whose
+# PATH may not include pm's managed node. Symlink it into /usr/local/bin so
+# the auth-proxy and cig-adapter launchers resolve `node` in any context.
+RUN ln -sf "$(command -v node)" /usr/local/bin/node
 
 # --- Runtime deps for the auth-proxy (Node is in the base image via pm) ---
 # Pinned exact versions (supply-chain discipline, SOP-001 §6):
@@ -71,6 +77,13 @@ RUN chmod +x /usr/local/bin/cig-adapter /usr/local/bin/auth-proxy
 COPY cont-init.d/02-installhermes-config.sh /etc/cont-init.d/02-installhermes-config.sh
 RUN chmod +x /etc/cont-init.d/02-installhermes-config.sh
 
-# Base image ENTRYPOINT (/init → s6) and CMD are inherited unchanged.
+# Headless CMD (staging fix v2): the base image's default CMD is the
+# interactive `hermes` TUI — it exits without a TTY and kills the container
+# during startup (lease 01a156ce: LEASE_STATE_REJECTED/ContainerExited).
+# `gateway run` is the official headless invocation: a supervised sleep
+# heartbeat while s6-overlay manages the actual gateway + dashboard.
+CMD ["gateway", "run"]
+
+# Base image ENTRYPOINT (/init → s6) is inherited.
 # Env contract (set by provision-buffer / deploy-agent manifests):
 #   See README.md "Container environment contract".
