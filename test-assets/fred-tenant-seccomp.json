@@ -57,6 +57,32 @@
  "syscalls": [
   {
    "names": [
+    "setuid",
+    "setgid",
+    "setgroups",
+    "setreuid",
+    "setregid",
+    "setresuid",
+    "setresgid",
+    "setfsuid",
+    "setfsgid",
+    "chown",
+    "chown32",
+    "fchown",
+    "fchown32",
+    "lchown",
+    "lchown32",
+    "fchownat",
+    "chmod",
+    "fchmod",
+    "fchmodat",
+    "fchmodat2"
+   ],
+   "action": "SCMP_ACT_ERRNO",
+   "errnoRet": 1
+  },
+  {
+   "names": [
     "accept",
     "accept4",
     "access",

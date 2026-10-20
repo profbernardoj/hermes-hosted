@@ -66,6 +66,18 @@ RUN cd /usr/local/lib/installhermes/auth-proxy && \
     npm ci --omit=dev --no-audit --no-fund && \
     npm cache clean --force
 
+# --- Degraded-mode drop shim (v9) ---
+# Fred's tenant sandbox denies the hermes privilege drop (lease 01a159c1:
+# s6-applyuidgid fatal, setgroups EPERM; chown to uid 10000 fails the same
+# way). Baked at BUILD time with mode 755 — the v9 entrypoint prepends its
+# dir to PATH ONLY when its drop probe fails, so upstream cont-init (which
+# hard-requires the drop under set -eu) completes as root (the everclaw/IOC
+# fleet pattern on the same backend) and NO runtime chmod/chown is needed
+# (also denied). When drops work, the real /command/s6-setuidgid stays on
+# PATH and this shim is inert.
+COPY shims/s6-setuidgid /usr/local/lib/installhermes/shims/s6-setuidgid
+RUN chmod 755 /usr/local/lib/installhermes/shims/s6-setuidgid
+
 # --- Service startup: v8 entrypoint supervisor (NO s6 services) ---
 # v7 registered cig-adapter + auth-proxy as s6-rc services and let the base
 # image's /init run the supervision tree. That is impossible on Fred: s6

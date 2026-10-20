@@ -86,6 +86,40 @@ if [ -z "$S6_SETUIDGID" ]; then
   exit 111
 fi
 
+# --- Drop-capability probe (v9) — Fred's sandbox denies the hermes drop ---
+# Lease 01a159c1 (v8 image 2026.10.20.1417, 2026-10-20) died at bootstrap:
+#   [stage2] Warning: chown /opt/data failed (rootless container?) — continuing
+#   s6-applyuidgid: fatal: unable to set supplementary group list: Operation not permitted
+#   [installhermes] FATAL: cont-init failed (01-hermes-setup, exit 111)
+# The backend EPERM's the uid/gid syscalls (user-namespace mapping or syscall
+# denial; chown to uid 10000 fails the same way), so the upstream drop is
+# impossible — and stage2-hook.sh hard-requires it (set -eu at its first
+# as_hermes()). The everclaw/IOC fleet runs as ROOT on the same backend;
+# that is why it never hits this.
+#
+# Probe ONCE. If the drop works: normal mode (services as hermes, upstream
+# contract preserved). If it cannot: DEGRADED-ROOT mode — prepend the baked
+# no-op drop shim dir (/usr/local/lib/installhermes/shims — image layer, so
+# no runtime chmod/chown, which are also denied) to PATH and re-resolve
+# S6_SETUIDGID to the shim: upstream cont-init completes (its drops become
+# root-execs), all services run as root (IOC pattern; container isolation
+# is the security boundary on this backend).
+DROPS_ENABLED=1
+if "$S6_SETUIDGID" hermes /bin/true 2>/dev/null; then
+  log "privilege drop to 'hermes' verified — services will run as hermes (normal mode)"
+else
+  DROPS_ENABLED=0
+  SHIM=/usr/local/lib/installhermes/shims/s6-setuidgid
+  if [ ! -x "$SHIM" ]; then
+    log "FATAL: drop unavailable AND the degraded-mode shim is missing at $SHIM"
+    exit 111
+  fi
+  export PATH="/usr/local/lib/installhermes/shims:$PATH"
+  S6_SETUIDGID="$SHIM"
+  log "WARN: privilege drop to 'hermes' unavailable (EPERM) — DEGRADED-ROOT mode:"
+  log "WARN: upstream cont-init drops and all services will run as root (everclaw/IOC fleet pattern)"
+fi
+
 # ---------------------------------------------------------------- Phase 1 ---
 run_continit() {
   # MUST-SUCCEED scripts: a failure here is a broken bootstrap → abort the

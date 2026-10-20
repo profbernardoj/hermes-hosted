@@ -43,6 +43,18 @@ them (restart backoff, clean SIGTERM). Nothing ever executes from `/run`.
 CI enforces this with a permanent `--tmpfs /run:rw,noexec` gate on the
 smoke container. The everclaw/IOC images have always run this way on Fred.
 
+
+## Degraded-root mode (v9)
+
+Fred's tenant sandbox denies the hermes privilege drop: the uid/gid syscalls
+EPERM (`s6-applyuidgid: fatal: unable to set supplementary group list`) and
+chown to the hermes UID fails the same way (lease 01a159c1 logs). The v9
+entrypoint probes the drop once at boot. When the backend denies it, a baked
+no-op drop shim is prepended to PATH and everything (upstream cont-init and
+all services) runs as root — the same posture as the everclaw/IOC fleet on
+the same backend, where container isolation is the security boundary. On
+drop-capable backends the real drop is used and the shim is inert.
+
 ## Why an adapter?
 
 hermes-agent speaks OpenAI-compatible endpoints natively (`OPENAI_BASE_URL` + `OPENAI_API_KEY`), but our CIG requires short-lived tokens minted per-container with `binding_secret`. The `cig-adapter` bridges the two without ever placing a Morpheus master key inside the container.

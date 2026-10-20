@@ -53,17 +53,28 @@ jobs:
           echo "image=ghcr.io/${{ github.repository }}:$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Run container with buffer-manifest env shape
-        # v8 Fred-parity gate: Fred's tenant sandbox denies exec of files under
-        # /run (5/5 leases 2026-10-20: s6 stage0 "exec: /run/s6/basedir/bin/init:
-        # Permission denied", exit 126). --tmpfs /run:rw,noexec reproduces that
-        # condition on the runner: any image that executes from /run FAILS this
-        # gate. s6-overlay v3 CANNOT pass it (stage0 generates + execs its init
-        # from /run/s6/basedir at boot). The v8 entrypoint must boot with zero
-        # exec-from-/run.
+        # v8/v9 Fred-parity gates on the MAIN smoke run — a real lease faces BOTH
+        # restrictions at once, so the main container carries both:
+        #   v8 gate: --tmpfs /run:rw,noexec — Fred denies exec of files under
+        #     /run (5/5 leases 2026-10-20: s6 stage0 "exec: /run/s6/basedir/
+        #     bin/init: Permission denied", exit 126). s6-overlay v3 cannot
+        #     pass this; the v8 entrypoint never execs from /run.
+        #   v9 gate: the tenant seccomp profile (test-assets/fred-tenant-
+        #     seccomp.json, v2) — Fred denies the hermes privilege drop (lease
+        #     01a159c1, v8 image 2026.10.20.1417: "s6-applyuidgid: fatal:
+        #     unable to set supplementary group list: Operation not permitted",
+        #     upstream stage2 died at its first as_hermes(); chown to uid
+        #     10000 EPERM'd the same way). v2 denies the uid/gid + chown/chmod
+        #     family EPERM on top of the v1 ioctl denials. The v8 image FAILS
+        #     this gate (dies at stage2); the v9 entrypoint probes the drop and
+        #     falls back to the baked no-op shim → degraded-root mode → must
+        #     PASS. Any future image that needs the drop to work will fail
+        #     this gate loudly — deliberate, not drift.
         run: |
           docker rm -f smoke 2>/dev/null || true
           docker run -d --name smoke -p 18789:18789 \
             --tmpfs /run:rw,noexec,size=64m \
+            --security-opt seccomp=./test-assets/fred-tenant-seccomp.json \
             -e PRIVY_APP_ID=cl-smoke-installhermes-not-real \
             -e PRIVY_VERIFICATION_KEY=MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEeF3cphhczAWSVDSNDib+kjVWSz0V2WEC5mn4EdRzdn8Jti3bhQMNaM422u9wSMLrQOr/ez2dBtjhiLirG7Gexw== \
             -e OPENCLAW_OWNER_ID=buffer-unassigned \

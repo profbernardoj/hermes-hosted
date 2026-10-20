@@ -1,5 +1,38 @@
 # Changelog
 
+## 2026.10.20 (v9 — degraded-root mode: Fred denies the hermes privilege drop)
+
+### Fixed
+- **SECOND Fred sandbox restriction found via lease 01a159c1** (v8 image
+  2026.10.20.1417, container logs pulled with fred-ops): after the noexec-/run
+  fix, v8 still died at bootstrap — upstream stage2-hook.sh hard-requires the
+  privilege drop to the hermes user (`as_hermes()` under `set -eu`), and the
+  backend EPERM's the uid/gid syscalls: `s6-applyuidgid: fatal: unable to set
+  supplementary group list: Operation not permitted`, plus
+  `[stage2] Warning: chown /opt/data failed (rootless container?)` (chown to
+  uid 10000 denied the same way). The everclaw/IOC fleet never hits this —
+  those containers run as root.
+- **v9: drop-capability probe + baked no-op drop shim.** The entrypoint probes
+  `s6-setuidgid hermes /bin/true` once at boot. When it works: normal mode,
+  upstream contract preserved (services as hermes). When the backend denies
+  it: DEGRADED-ROOT mode — the entrypoint prepends
+  `/usr/local/lib/installhermes/shims` (baked at build time, mode 755 — no
+  runtime chmod/chown, which the backend also denies) to PATH; `shims/
+  s6-setuidgid` shifts the user argument and execs the command as-is, so
+  upstream cont-init completes and ALL services run as root — the same
+  posture as the everclaw/IOC fleet on the same backend (container isolation
+  is the security boundary there).
+- **cont-init 02: sed-free, chmod-free .env merge.** GNU `sed -i` and bare
+  `chmod` perform ownership syscalls the backend EPERM's; the merge is now a
+  pure read/printf/mv rewrite with `umask 077` (0600 from creation), and the
+  chown/chmod re-asserts are fail-soft. config.yaml/SOUL.md chowns likewise.
+- **smoke: the tenant seccomp profile is v2** (adds the uid/gid + chown/chmod
+  family EPERM on top of the v1 ioctl denials) and the MAIN smoke container
+  now carries BOTH Fred-parity gates at once (`--tmpfs /run:rw,noexec` +
+  the v2 profile) — a real lease faces both restrictions simultaneously.
+  v8 dies at stage2 under the v2 profile (proven by dispatch below); v9's
+  degraded-root mode must pass. The gate is permanent.
+
 ## 2026.10.20 (v8 — no-s6 entrypoint: the Fred /run exec fix)
 
 ### Fixed

@@ -60,29 +60,38 @@ mkdir -p "$HERMES_HOME"
 # generated API_SERVER_KEY); we own exactly two keys. OPENAI_API_KEY is
 # origin-bound by hermes (sent only to the adapter's origin) and is a
 # container-local static key — never a real provider key.
-set_kv() { # $1=file $2=key $3=value — replace the existing line or append
-  if grep -q "^$2=" "$1" 2>/dev/null; then
-    sed -i "s|^$2=.*|$2=$3|" "$1"
-  else
-    printf '%s=%s\n' "$2" "$3" >> "$1"
+#
+# v9 (Fred's sandbox): the rewrite is sed-free and chmod-free — GNU sed -i
+# and bare chmod do ownership syscalls the backend EPERM's (lease 01a159c1:
+# chown + setgroups both denied), and set -e here would abort the boot.
+# Pure read/printf/mv with `umask 077` so the rewritten file is 0600 from
+# creation; the chown/chmod re-asserts below are tolerated (no-ops fail soft
+# in degraded-root mode where everything runs as root anyway).
+BASE_URL="http://127.0.0.1:${CIG_ADAPTER_PORT:-18900}/v1"
+ADAPTER_KEY="${CIG_ADAPTER_KEY:-}"
+ENV_TMP="${ENV_FILE}.v9tmp.$$"
+SEEN_URL=0
+SEEN_KEY=0
+( umask 077
+  if [ ! -f "$ENV_FILE" ] || ! grep -q "^# Managed by hermes-hosted" "$ENV_FILE" 2>/dev/null; then
+    printf '# Managed by hermes-hosted (installhermes.ai) — regenerated at boot.\n'
   fi
-}
-
-if [ ! -f "$ENV_FILE" ]; then
-  # .env should already exist (01-hermes-setup creates it as hermes, 0600);
-  # if it somehow does not, create it under a restrictive umask as hermes so
-  # there is no root-owned window (upstream OOF-285 pattern).
-  as_hermes sh -c "umask 077 && touch '$ENV_FILE'"
-fi
-set_kv "$ENV_FILE" OPENAI_BASE_URL "http://127.0.0.1:${CIG_ADAPTER_PORT:-18900}/v1"
-set_kv "$ENV_FILE" OPENAI_API_KEY "${CIG_ADAPTER_KEY}"
-# Keep the marker comment at the top (once).
-if ! grep -q "Managed by hermes-hosted" "$ENV_FILE"; then
-  sed -i '1i # Managed by hermes-hosted (installhermes.ai) — regenerated at boot.' "$ENV_FILE"
-fi
-# .env must stay hermes-owned and private (our sed/appends may run as root).
+  if [ -f "$ENV_FILE" ]; then
+    while IFS= read -r _line || [ -n "$_line" ]; do
+      case "$_line" in
+        OPENAI_BASE_URL=*) printf 'OPENAI_BASE_URL=%s\n' "$BASE_URL"; SEEN_URL=1 ;;
+        OPENAI_API_KEY=*)  printf 'OPENAI_API_KEY=%s\n' "$ADAPTER_KEY"; SEEN_KEY=1 ;;
+        *) printf '%s\n' "$_line" ;;
+      esac
+    done < "$ENV_FILE"
+  fi
+  [ "$SEEN_URL" = 1 ] || printf 'OPENAI_BASE_URL=%s\n' "$BASE_URL"
+  [ "$SEEN_KEY" = 1 ] || printf 'OPENAI_API_KEY=%s\n' "$ADAPTER_KEY"
+) > "$ENV_TMP" && mv "$ENV_TMP" "$ENV_FILE"
+# Ownership re-asserts (tolerated: EPERM on degraded backends — everything is
+# root there; on drop-capable backends these restore hermes ownership).
 chown hermes:hermes "$ENV_FILE" 2>/dev/null || true
-chmod 600 "$ENV_FILE"
+chmod 600 "$ENV_FILE" 2>/dev/null || true
 
 # --- config.yaml: model default + persona basics ---
 # Only written when absent or previously written by us (never clobber user edits

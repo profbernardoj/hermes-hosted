@@ -1,0 +1,22 @@
+#!/bin/sh
+# v9 degraded-mode no-op drop shim (baked into the image, OFF-PATH by default).
+#
+# Fred's tenant sandbox denies the hermes privilege drop: lease 01a159c1
+# (v8 image 2026.10.20.1417) container logs:
+#   [stage2] Warning: chown /opt/data failed (rootless container?) — continuing
+#   s6-applyuidgid: fatal: unable to set supplementary group list: Operation not permitted
+# The drop (and chown to uid 10000) is EPERM — user-namespace mapping or
+# syscall denial. The everclaw/IOC fleet runs as root on the same backend and
+# never hits this.
+#
+# This shim drops the FIRST argument (the user s6-setuidgid would drop to) and
+# execs the command as-is. The v9 entrypoint prepends its directory to PATH
+# ONLY when its drop probe fails, so upstream cont-init (which hard-requires
+# the drop under set -eu — stage2-hook.sh dies at its first as_hermes() call)
+# completes with everything running as root: the IOC pattern. When the drop
+# works, the real /command/s6-setuidgid stays on PATH and this file is inert.
+#
+# Baked at BUILD time (mode 755 set in the Dockerfile) so degraded mode needs
+# NO runtime file writes, chmod, or chown — all of which the sandbox denies.
+shift
+exec "$@"
