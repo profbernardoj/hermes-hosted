@@ -299,6 +299,27 @@ jobs:
           echo "=== smoke-seccomp logs (the failing boot step, if any) ==="
           docker logs smoke-seccomp 2>&1 | head -150 || true
 
+      - name: Dashboard death diagnostic (degraded-root — capture the exact failure point)
+        # 2026-10-20 run 39453371660: in DEGRADED-ROOT mode the auth-proxy and
+        # cig-adapter run healthy as root through the baked shim, but the
+        # dashboard child dies rc 111 with "s6-applyuidgid: fatal: unable to
+        # set supplementary group list" — i.e. the REAL s6 chain ran, the shim
+        # did not intercept. This diagnostic reproduces the boot in the
+        # foreground and captures the full output, checks the in-container
+        # PATH/shim mechanics, and greps for absolute-path s6 invocations.
+        if: always()
+        run: |
+          echo "=== container PATH + shim presence (docker exec uses the IMAGE env, not the supervisor's) ==="
+          docker exec smoke sh -c 'echo PATH=$PATH; ls -l /usr/local/lib/installhermes/shims/ 2>/dev/null; command -v s6-setuidgid || echo "s6-setuidgid not on default exec PATH"' || true
+          echo "=== shim intercept check (expect shim-rc=0) ==="
+          docker exec smoke sh -c 'export PATH=/usr/local/lib/installhermes/shims:$PATH; s6-setuidgid hermes /bin/true; echo shim-rc=$?' || true
+          echo "=== real binary check (expect fatal + real-rc=111 under the gate) ==="
+          docker exec smoke sh -c '/command/s6-setuidgid hermes /bin/true; echo real-rc=$?' || true
+          echo "=== absolute-path s6 invocations in the install tree ==="
+          docker exec smoke sh -c 'grep -rn "s6-setuidgid\|s6-applyuidgid" /opt/hermes/hermes_cli/*.py /opt/hermes/hermes_bootstrap.py 2>/dev/null | grep -v "^.*#.*s6" | head -8' || true
+          echo "=== manual dashboard foreground boot via shim (port 9120; full output) ==="
+          docker exec smoke sh -c 'export PATH=/usr/local/lib/installhermes/shims:/command:$PATH; cd /opt/data; HOME=/opt/data timeout 90 hermes dashboard --host 127.0.0.1 --port 9120 --no-open 2>&1 | head -80; echo boot-rc=$?' || true
+
       - name: Always dump logs (failure or success)
         if: always()
         run: |
