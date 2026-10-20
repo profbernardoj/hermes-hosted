@@ -19,3 +19,13 @@
   gateway + dashboard).
 - `node` symlinked into /usr/local/bin (s6 services run with a minimal PATH).
 - ARG re-declared after FROM so the base-image LABEL resolves.
+
+## 2026.10.20.2 (v4 smoke-diagnosed fixes)
+
+### Fixed
+- auth-proxy crashed at boot: `egress-probes.mjs` was not copied into the image
+  (server.mjs imports it). Full runtime file set now copied.
+- s6 services ran with a SCRUBBED environment (`/init` scrubs env before
+  services; the base image's own main-wrapper rehydrates via `with-contenv`).
+  Both service run scripts now wrap with `/command/with-contenv` — without it
+  CIG_*/BRAND_*/HANDOFF_* env was invisible to auth-proxy and cig-adapter.

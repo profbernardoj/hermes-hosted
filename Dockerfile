@@ -36,6 +36,7 @@ LABEL io.installhermes.base-image="nousresearch/hermes-agent:${HERMES_BASE_VERSI
 # --- Our services (copied before s6 service definitions) ---
 COPY cig-adapter/server.mjs /usr/local/lib/installhermes/cig-adapter/server.mjs
 COPY auth-proxy/server.mjs /usr/local/lib/installhermes/auth-proxy/server.mjs
+COPY auth-proxy/egress-probes.mjs /usr/local/lib/installhermes/auth-proxy/egress-probes.mjs
 COPY auth-proxy/login.html /usr/local/lib/installhermes/auth-proxy/login.html
 COPY auth-proxy/package.json /usr/local/lib/installhermes/auth-proxy/package.json
 
@@ -50,7 +51,7 @@ RUN cd /usr/local/lib/installhermes/auth-proxy && \
 # cig-adapter: loopback-only OpenAI-compatible endpoint for hermes LLM calls.
 RUN mkdir -p /etc/s6-overlay/s6-rc.d/cig-adapter /etc/s6-overlay/s6-rc.d/user/contents.d && \
     printf 'longrun\n' > /etc/s6-overlay/s6-rc.d/cig-adapter/type && \
-    printf '#!/command/execlineb -P\ns6-setuidgid hermes /usr/local/bin/cig-adapter\n' \
+    printf '#!/command/execlineb -P\n/command/with-contenv s6-setuidgid hermes /usr/local/bin/cig-adapter\n' \
       > /etc/s6-overlay/s6-rc.d/cig-adapter/run && \
     chmod +x /etc/s6-overlay/s6-rc.d/cig-adapter/run && \
     touch /etc/s6-overlay/s6-rc.d/user/contents.d/cig-adapter
@@ -58,7 +59,7 @@ RUN mkdir -p /etc/s6-overlay/s6-rc.d/cig-adapter /etc/s6-overlay/s6-rc.d/user/co
 # auth-proxy: the ONLY externally-exposed surface (ingress :18789).
 RUN mkdir -p /etc/s6-overlay/s6-rc.d/auth-proxy /etc/s6-overlay/s6-rc.d/user/contents.d && \
     printf 'longrun\n' > /etc/s6-overlay/s6-rc.d/auth-proxy/type && \
-    printf '#!/command/execlineb -P\ns6-setuidgid hermes /usr/local/bin/auth-proxy\n' \
+    printf '#!/command/execlineb -P\n/command/with-contenv s6-setuidgid hermes /usr/local/bin/auth-proxy\n' \
       > /etc/s6-overlay/s6-rc.d/auth-proxy/run && \
     chmod +x /etc/s6-overlay/s6-rc.d/auth-proxy/run && \
     touch /etc/s6-overlay/s6-rc.d/user/contents.d/auth-proxy
