@@ -31,7 +31,15 @@ on:
 jobs:
   smoke:
     if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
-    runs-on: ubuntu-latest
+    # ubuntu-22.04, NOT ubuntu-latest: the ubuntu24/20261012.334 pool image
+    # (served from 2026-10-20 ~15:19 UTC) ships docker 28.0.4 with a broken
+    # netns handler — every `docker run -p` dies at the daemon
+    # ("bind-mount /proc/<pid>/ns/net -> /var/run/docker/netns/<id>: no such
+    # file or directory"), a daemon restart does not fix it, and builds stay
+    # green (buildkit never hits that path). The 22.04 pool's docker is older
+    # and clean. Revisit if 22.04 retires (2027-04) — or pin back to latest
+    # once the ubuntu24 pool image is fixed.
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
       packages: read
