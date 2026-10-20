@@ -66,6 +66,15 @@ shopt -s nullglob   # empty-dir globs vanish instead of expanding to a literal
 
 log() { printf '[installhermes] %s\n' "$*"; }
 
+# --- PATH: /command must be on it (v8 smoke run 39437219342 catch) ---
+# Upstream's cont-init scripts and service contracts call BARE s6-setuidgid
+# (and other s6 tools). Under the s6 boot, /init's environment injected
+# /command into PATH; as PID 1 we inherit only the image's Docker ENV PATH,
+# which does NOT include it — stage2-hook.sh died "s6-setuidgid: not found"
+# at its first as_hermes() call. Prepend /command (and keep everything the
+# image already provides, incl. the hermes venv on PATH for the dashboard).
+export PATH="/command:${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
+
 S6_SETUIDGID="$(command -v s6-setuidgid || true)"
 if [ -z "$S6_SETUIDGID" ]; then
   for cand in /command/s6-setuidgid /usr/local/bin/s6-setuidgid /package/admin/s6-overlay/command/s6-setuidgid; do
@@ -81,6 +90,9 @@ fi
 run_continit() {
   # MUST-SUCCEED scripts: a failure here is a broken bootstrap → abort the
   # container (exit non-zero, Fred rejects the lease — same contract s6 gave).
+  # NOTE: capture rc BEFORE the if — `if ! sh ...` exposes the NEGATED status
+  # inside the block, which logged a misleading "exit 0" on the first v8 smoke
+  # (run 39437219342). Run, capture, then branch.
   local script rc
   for script in /etc/cont-init.d/01-hermes-setup \
                 /etc/cont-init.d/02-installhermes-config.sh; do
@@ -89,8 +101,9 @@ run_continit() {
       exit 112
     fi
     log "cont-init: running $script"
-    if ! sh "$script"; then
-      rc=$?
+    sh "$script"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
       log "FATAL: cont-init failed ($script, exit $rc) — aborting (bootstrap contract)"
       exit 112
     fi
@@ -103,8 +116,9 @@ run_continit() {
   local rec=/etc/cont-init.d/02-reconcile-profiles
   if [ -x "$rec" ]; then
     log "cont-init (best-effort): running $rec"
-    if ! sh "$rec"; then
-      rc=$?
+    sh "$rec"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
       log "WARN: $rec exited $rc — no s6 runtime, profile gateways unavailable (expected)"
     fi
   fi
@@ -191,8 +205,8 @@ supervise() {
   while :; do
     # wait -n wakes on ANY child exit (or a trapped signal; the trap then
     # runs shutdown and exits the container). Its rc is the exit status of
-    # ONE exited child; if several died in one wake, later ones log "rc
-    # unknown" — supervision behavior is unaffected.
+    # ONE exited child and is attributed to every service found dead in
+    # this wake (close enough for the log; restart behavior is unaffected).
     wait -n
     rc=$?
     for name in auth-proxy dashboard cig-adapter; do
