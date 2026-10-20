@@ -91,7 +91,8 @@ jobs:
           for i in $(seq 1 20); do
             sleep 30
             STATE=$(docker inspect --format '{{.State.Status}}' smoke 2>/dev/null || echo gone)
-            echo "[t+$((i*30))s] container state: $STATE"
+            MEM=$(docker stats --no-stream --format "{{.MemUsage}}" smoke 2>/dev/null || echo "?")
+            echo "[t+$((i*30))s] container state: $STATE mem: $MEM"
             if [ "$STATE" != "running" ]; then DEAD=1; break; fi
           done
           if [ "$DEAD" = "1" ]; then
@@ -128,6 +129,9 @@ jobs:
             exit 1
           fi
           echo "ALL SERVICE ASSERTIONS PASSED"
+          echo "=== memory + disk footprint (SKU sizing evidence) ==="
+          docker stats --no-stream smoke || true
+          docker exec smoke sh -c 'cat /sys/fs/cgroup/memory.peak 2>/dev/null; cat /sys/fs/cgroup/memory.max 2>/dev/null; du -sh /opt/data 2>/dev/null; du -sh /opt/hermes 2>/dev/null; df -h /opt/data 2>/dev/null | tail -1' || true
 
       - name: Init-wrap probe (Fred parity — tini as PID 1, entrypoint NOT PID 1)
         # Fred's manifest guide exposes an `init` field (tini as PID 1). If a
