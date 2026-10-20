@@ -115,7 +115,7 @@ jobs:
           docker rm -f smoke 2>/dev/null || true
           docker run -d --name smoke -p 18789:18789 \
             --tmpfs /run:rw,noexec,size=64m \
-            --cap-drop=SETUID,SETGID,CHOWN \
+            --cap-drop=SETUID --cap-drop=SETGID --cap-drop=CHOWN \
             -e PRIVY_APP_ID=cl-smoke-installhermes-not-real \
             -e PRIVY_VERIFICATION_KEY=MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEeF3cphhczAWSVDSNDib+kjVWSz0V2WEC5mn4EdRzdn8Jti3bhQMNaM422u9wSMLrQOr/ez2dBtjhiLirG7Gexw== \
             -e OPENCLAW_OWNER_ID=buffer-unassigned \
