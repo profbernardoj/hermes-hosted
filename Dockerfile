@@ -15,8 +15,13 @@
 #                     local key; it mints short-lived CIG tokens (service mode,
 #                     binding_secret) and forwards to cig-inference → Morpheus.
 #                     No Morpheus master key ever enters the container.
-#   3. cont-init    — writes hermes config.yaml + .env from container env
-#                     (headless, no interactive setup).
+#   3. entrypoint    — v8 PID 1 supervisor (NO s6). Runs the cont-init
+#                     scripts, starts the services (privilege-dropped via
+#                     s6-setuidgid from the IMAGE LAYER), supervises with
+#                     backoff. NOTHING EXECUTES FROM /run — Fred's tenant
+#                     sandbox denies exec under /run, which kills every
+#                     s6-overlay image (stage0 execs its runtime-generated
+#                     /run/s6/basedir/bin/init; 5/5 leases 2026-10-20).
 #
 # SOP-004 hard rules honored: built by GitHub Actions → GHCR only; amd64;
 # NEVER built locally on the Mac mini. Base pinned to an immutable version
@@ -61,47 +66,31 @@ RUN cd /usr/local/lib/installhermes/auth-proxy && \
     npm ci --omit=dev --no-audit --no-fund && \
     npm cache clean --force
 
-# --- s6 service definitions (the base image is s6-overlay PID 1) ---
-# cig-adapter: loopback-only OpenAI-compatible endpoint for hermes LLM calls.
-RUN mkdir -p /etc/s6-overlay/s6-rc.d/cig-adapter /etc/s6-overlay/s6-rc.d/user/contents.d && \
-    printf 'longrun\n' > /etc/s6-overlay/s6-rc.d/cig-adapter/type && \
-    printf '#!/command/execlineb -P\n/command/with-contenv s6-setuidgid hermes /usr/local/bin/cig-adapter\n' \
-      > /etc/s6-overlay/s6-rc.d/cig-adapter/run && \
-    chmod +x /etc/s6-overlay/s6-rc.d/cig-adapter/run && \
-    touch /etc/s6-overlay/s6-rc.d/user/contents.d/cig-adapter
-
-# auth-proxy: the ONLY externally-exposed surface (ingress :18789).
-RUN mkdir -p /etc/s6-overlay/s6-rc.d/auth-proxy /etc/s6-overlay/s6-rc.d/user/contents.d && \
-    printf 'longrun\n' > /etc/s6-overlay/s6-rc.d/auth-proxy/type && \
-    printf '#!/command/execlineb -P\n/command/with-contenv s6-setuidgid hermes /usr/local/bin/auth-proxy\n' \
-      > /etc/s6-overlay/s6-rc.d/auth-proxy/run && \
-    chmod +x /etc/s6-overlay/s6-rc.d/auth-proxy/run && \
-    touch /etc/s6-overlay/s6-rc.d/user/contents.d/auth-proxy
+# --- Service startup: v8 entrypoint supervisor (NO s6 services) ---
+# v7 registered cig-adapter + auth-proxy as s6-rc services and let the base
+# image's /init run the supervision tree. That is impossible on Fred: s6
+# stage0 generates and execs /run/s6/basedir/bin/init, and Fred's tenant
+# sandbox denies exec under /run (5/5 rejected leases, "Permission denied",
+# exit 126). v8 replaces the base image's ENTRYPOINT entirely — our
+# supervisor is PID 1, runs cont-init from the image layer, privilege-drops
+# each service via s6-setuidgid (also image-layer), and restarts crashes
+# with backoff. main-hermes (upstream no-op sleep) and the gateway (exits
+# without channels; api_server :8642 therefore not listening) are not
+# started; the dashboard provides the product chat surface.
+COPY entrypoint.sh /usr/local/bin/installhermes-entrypoint
+RUN chmod +x /usr/local/bin/installhermes-entrypoint
 
 # --- Launchers ---
 COPY bin/cig-adapter /usr/local/bin/cig-adapter
 COPY bin/auth-proxy /usr/local/bin/auth-proxy
 RUN chmod +x /usr/local/bin/cig-adapter /usr/local/bin/auth-proxy
 
-# --- cont-init: headless hermes config (runs before any service) ---
+# --- cont-init: headless hermes config (run by the v8 entrypoint, before services) ---
 COPY cont-init.d/02-installhermes-config.sh /etc/cont-init.d/02-installhermes-config.sh
 RUN chmod +x /etc/cont-init.d/02-installhermes-config.sh
 
-# Headless main program (v6 fix): `sleep infinity` holds /init's main-program
-# slot while the s6 services (main-hermes agent, dashboard, loopback
-# api_server, cig-adapter, auth-proxy) do all the work. Bare-exec of an
-# executable is a documented upstream pattern (main-wrapper.sh: "first arg
-# is an executable → exec it directly (sleep, bash, sh, …)").
-#
-# `gateway run` (v2–v5) was WRONG: it is the MESSAGING-gateway invocation
-# (upstream docker-compose runs it for Telegram/Discord/... channel deploys).
-# With no channels configured the process exits → /init begins stage-3
-# shutdown → the container dies during startup (Fred leases 01a156ce,
-# 01a156d8, 01a1573d: LEASE_STATE_REJECTED / ContainerExited). The CI smoke's
-# 45-second window masked this — the exit lands between ~45s and Fred's
-# ~3-minute startup supervision window.
-CMD ["sleep", "infinity"]
-
-# Base image ENTRYPOINT (/init → s6) is inherited.
+# v8: OUR ENTRYPOINT replaces the base image's s6-overlay entrypoint. No CMD —
+# the supervisor never execs a main program; it IS the container's lifetime.
+ENTRYPOINT ["/usr/local/bin/installhermes-entrypoint"]
 # Env contract (set by provision-buffer / deploy-agent manifests):
 #   See README.md "Container environment contract".

@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026.10.20 (v8 — no-s6 entrypoint: the Fred /run exec fix)
+
+### Fixed
+- **ROOT CAUSE of all 5 rejected Fred leases** (Manifest container logs,
+  2026-10-20): s6-overlay v3 generates its init INTO `/run/s6/basedir/bin/init`
+  at boot (`s6-linux-init-maker`) and execs it from there; Fred's tenant
+  sandbox denies exec of files under `/run`. Every lease died identically in
+  <10s: `stage0: 83: exec: /run/s6/basedir/bin/init: Permission denied`,
+  exit 126 — both backends (docker-10, docker-13), images 2026.10.20.050 →
+  .339. Plain Docker, `docker run --init`, and a faithful tenant-seccomp
+  profile all boot the same image fine (seccomp cannot filter by path; the
+  denial is mount/LSM level), which is why every v2–v7 probe passed while
+  Fred rejected. PROVEN in CI: `--tmpfs /run:rw,noexec` on the v7 image
+  reproduces the exact Fred signature (same error line, ExitCode=126).
+- **v8: our own PID 1 entrypoint replaces s6 entirely.** `entrypoint.sh`
+  (installed at `/usr/local/bin/installhermes-entrypoint`, image layer —
+  nothing ever executes from `/run`): runs the cont-init scripts
+  (01-hermes-setup MUST-succeed, ours MUST-succeed, 02-reconcile-profiles
+  best-effort — nothing to reconcile without an s6 runtime), loads
+  `/run/s6/container_environment` as env (the with-contenv equivalent),
+  starts auth-proxy / dashboard / cig-adapter with the same privilege drops
+  (s6-setuidgid from the IMAGE LAYER at /command) and the same upstream
+  dashboard contract (HOME=/opt/data, cwd /opt/data, loopback bind,
+  --no-open), hard-asserts the dashboard invariants (always on, always
+  loopback — a manifest value can never override), and supervises with
+  per-service restart backoff (2→64s, reset after 300s stable uptime) +
+  clean SIGTERM/SIGINT shutdown. `ENTRYPOINT` replaces the base image's
+  s6 entrypoint; no CMD (the supervisor IS the container's lifetime).
+  main-hermes (upstream no-op sleep) and the messaging gateway (exits with
+  no channels; api_server :8642 therefore not listening) are not started;
+  the dashboard provides the product chat surface.
+- **cont-init 02: MERGE .env instead of clobbering** — upstream
+  01-hermes-setup seeds .env (incl. generated API_SERVER_KEY) first; v7's
+  `cat > .env` destroyed those seeds. Only OPENAI_BASE_URL /
+  OPENAI_API_KEY are replaced/appended now. config.yaml + SOUL.md are
+  written with hermes ownership (the user/agent edits them at runtime).
+- **smoke: api_server assertion fixed (was vacuous)** — the `|| echo fail`
+  fallback concatenated curl's `000` with `fail` producing `000fail`, which
+  matched neither failure branch, so it "passed" while nothing listened.
+  Now captured correctly; v8 expects :8642 NOT listening (no gateway
+  process) — a future gateway enable must update the assertion deliberately.
+- **smoke: `--tmpfs /run:rw,noexec` Fred-parity gate on the main smoke
+  run** — any image that executes from /run fails CI. v7 fails it
+  (verified 2026-10-20, run 39436321478: ExitCode=126, same stage0 error
+  as Fred); v8 must pass it. This gate is permanent.
+
 ## 2026.10.20 (v6 + v7 — Fred ContainerExited fixes)
 
 ### Fixed

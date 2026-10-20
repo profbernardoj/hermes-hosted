@@ -25,6 +25,24 @@ hermes LLM calls (outbound):
                   (budgets enforced server-side; no Morpheus key in-container)
 ```
 
+
+## Why no s6-overlay? (v8)
+
+The base image ships an s6-overlay supervision tree. It cannot boot on Fred:
+s6-overlay v3 generates its init binary INTO `/run/s6/basedir/bin/init` at
+boot and executes it from there, and Fred's tenant sandbox denies exec of
+files under `/run` (5/5 rejected leases, 2026-10-20: exit 126 at s6 stage0).
+Plain Docker and `docker run --init` boot the same image fine — the denial
+is mount/LSM level, invisible to seccomp repros.
+
+v8 therefore replaces the base image's ENTRYPOINT with our own PID 1
+supervisor (`/usr/local/bin/installhermes-entrypoint`): it runs the same
+cont-init scripts from the image layer, starts the same services with the
+same privilege drops (`s6-setuidgid` from the image layer), and supervises
+them (restart backoff, clean SIGTERM). Nothing ever executes from `/run`.
+CI enforces this with a permanent `--tmpfs /run:rw,noexec` gate on the
+smoke container. The everclaw/IOC images have always run this way on Fred.
+
 ## Why an adapter?
 
 hermes-agent speaks OpenAI-compatible endpoints natively (`OPENAI_BASE_URL` + `OPENAI_API_KEY`), but our CIG requires short-lived tokens minted per-container with `binding_secret`. The `cig-adapter` bridges the two without ever placing a Morpheus master key inside the container.
