@@ -62,6 +62,7 @@
 # present.
 
 set -u
+shopt -s nullglob   # empty-dir globs vanish instead of expanding to a literal
 
 log() { printf '[installhermes] %s\n' "$*"; }
 
@@ -183,7 +184,9 @@ backoff_seconds() { # 2,4,8,16,32,64 — capped
 }
 
 supervise() {
-  trap 'shutdown' TERM INT
+  # Trap is installed ONCE in main (before cont-init) so SIGTERM/SIGINT during
+  # ANY phase — bootstrap, env load, spawn, supervision — runs shutdown():
+  # PID 1 must never take a default-killed exit while children exist.
   local name delay rc
   while :; do
     # wait -n wakes on ANY child exit (or a trapped signal; the trap then
@@ -235,6 +238,11 @@ shutdown() {
 [ "$(id -u)" = 0 ] || log "NOTE: starting as uid $(id -u) (non-root start; privilege drops still apply where possible)"
 
 log "v8 entrypoint starting (no s6; pid 1 supervisor)"
+# Install the shutdown trap BEFORE any work begins: a SIGTERM arriving during
+# cont-init, env load, or the first spawns must still run shutdown() — a
+# default-killed PID 1 would abandon already-started children mid-boot
+# (R1 audit catch; s6 parity: /init always owned signals from the first exec).
+trap 'shutdown' TERM INT
 run_continit
 load_container_environment
 # Re-assert invariants AFTER the container_environment load (a file written by
