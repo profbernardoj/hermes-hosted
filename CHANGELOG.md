@@ -1,5 +1,37 @@
 # Changelog
 
+## 2026.10.20 (v9.2 — HERMES_HOME writability chain + boot forensics: Fred restriction #3)
+
+### Fixed
+- **THIRD Fred restriction found via lease 01a15a53** (v9.1 image
+  2026.10.20.1656, container logs via fred-ops): the drop shim let the boot
+  reach stage2's `as_hermes mkdir -p` seed block, which died
+  `mkdir: cannot create directory '/opt/data': Permission denied` x14 — the
+  auto-attached VOLUME at the declared `/opt/data` (Manifest attaches 20 GB
+  at declared VOLUME paths) is UNWRITABLE even for container-root. The
+  everclaw fleet's volumes (`/home/node/*`, uid-1000 workload) work on the
+  same backend, so the attach is not universally writable.
+- **v9.2: boot forensics (every boot, in the container log):** id, key-dir
+  ls -ld, /proc/mounts extract, and a write-probe matrix across /opt/data,
+  /opt, /tmp, /run, /root — retrievable via the fred-ops logs endpoint on
+  any lease, dead or alive.
+- **v9.2: HERMES_HOME writability chain:** when `$HERMES_HOME` is unset, try
+  /opt/data, /opt/hermes-data, /tmp/hermes-data, /run/hermes-data — first
+  writable wins (mkdir + touch probe), exported BEFORE cont-init so every
+  consumer (upstream stage2, our cont-init, all service spawns) follows
+  it. Relocation logs loudly. No writable candidate = FATAL 115. Tradeoff:
+  a relocated HOME does not ride the backend volume — buffer containers
+  are disposable by design; the forensics lines make it diagnosable.
+- **Service spawns follow `$HERMES_HOME`** (cwd + HOME) instead of the
+  hard-coded /opt/data; the dashboard adds `--skip-build` (serve the dist
+  baked into the image — never npm-rebuild the web UI at container boot:
+  deterministic, faster, and immune to unwritable install trees).
+- **smoke: the main run now stacks the FULL Fred-parity gauntlet:**
+  `--read-only` rootfs + a read-only tmpfs MOUNTED AT `/opt/data` (models
+  the unwritable attach) + `--tmpfs /run:rw,noexec` + the cap drops. v9.2
+  must boot every service through that stack; stricter than Fred (if it
+  passes here, it passes there).
+
 ## 2026.10.20 (v9 — degraded-root mode: Fred denies the hermes privilege drop)
 
 ### Fixed

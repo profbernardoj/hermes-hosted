@@ -44,6 +44,18 @@ CI enforces this with a permanent `--tmpfs /run:rw,noexec` gate on the
 smoke container. The everclaw/IOC images have always run this way on Fred.
 
 
+
+## HERMES_HOME writability chain (v9.2)
+
+Manifest attaches persistent storage at declared VOLUME paths. Lease
+01a15a53 showed the attach at `/opt/data` can be UNWRITABLE even for
+container-root (the everclaw fleet's uid-1000 volumes work; ours did not).
+The v9.2 entrypoint probes home candidates (`/opt/data`, `/opt/hermes-data`,
+`/tmp/hermes-data`, `/run/hermes-data`) BEFORE cont-init, exports the first
+writable one as `HERMES_HOME`, and logs a full filesystem forensics block on
+every boot (retrievable via fred-ops on any lease). The dashboard also boots
+with `--skip-build` (the image ships the built web dist).
+
 ## Degraded-root mode (v9)
 
 Fred's tenant sandbox denies the hermes privilege drop: the uid/gid syscalls

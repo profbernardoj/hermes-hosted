@@ -111,10 +111,22 @@ jobs:
         #     profile (below, probe steps only) has run clean all day. A
         #     same-fleet control run WITHOUT the modified profile passed
         #     (run 39449661371) — the profile content was the trigger.
+        #   v9.2 gates: --read-only rootfs + a read-only tmpfs MOUNTED AT
+        #     /opt/data (the VOLUME path) — modeling lease 01a15a53's third
+        #     Fred restriction: the auto-attached volume at the declared
+        #     VOLUME path was UNWRITABLE even for container-root (stage2's
+        #     mkdir died "Permission denied" x14). The v9.2 entrypoint's
+        #     HERMES_HOME writability chain must relocate (forensics lines
+        #     log the exact filesystem state) and the FULL stack — noexec
+        #     /run + drops denied + ro rootfs + ro volume — must still boot
+        #     every service. Stricter than Fred (passes there, passes here).
         run: |
           docker rm -f smoke 2>/dev/null || true
           docker run -d --name smoke -p 18789:18789 \
+            --read-only \
+            --tmpfs /tmp:rw,size=2g \
             --tmpfs /run:rw,noexec,size=64m \
+            --tmpfs /opt/data:ro,size=16m \
             --cap-drop=SETUID --cap-drop=SETGID --cap-drop=CHOWN \
             -e PRIVY_APP_ID=cl-smoke-installhermes-not-real \
             -e PRIVY_VERIFICATION_KEY=MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEeF3cphhczAWSVDSNDib+kjVWSz0V2WEC5mn4EdRzdn8Jti3bhQMNaM422u9wSMLrQOr/ez2dBtjhiLirG7Gexw== \

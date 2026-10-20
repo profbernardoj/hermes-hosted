@@ -104,6 +104,53 @@ fi
 # S6_SETUIDGID to the shim: upstream cont-init completes (its drops become
 # root-execs), all services run as root (IOC pattern; container isolation
 # is the security boundary on this backend).
+# --- Boot forensics (v9.2) — logged EVERY boot, retrievable via fred-ops ---
+# Lease 01a15a53 (v9.1, 2026-10-20.1656) revealed Fred restriction #3: the
+# auto-attached VOLUME at /opt/data (Manifest attaches 20 GB at declared
+# VOLUME paths) was UNWRITABLE even for container-root — stage2's
+# `as_hermes mkdir -p` died "mkdir: cannot create directory '/opt/data':
+# Permission denied" x14 after the drop shim let the boot get that far.
+# The everclaw fleet's volumes (/home/node/*, uid-1000 workload) work, so
+# the attach is not universally writable. These five lines pin the exact
+# filesystem state on any backend, straight into the container log.
+log "forensics: $(id)"
+log "forensics: homes: $(ls -ld / /opt /opt/data /opt/hermes /tmp /run /root 2>&1 | sed 's/^/  /' | tr '\n' ';')"
+log "forensics: mounts: $(grep -E ' /opt| /tmp| /run| / ' /proc/mounts | awk '{print $2, $3, $4, "src="substr($1,1,40)}' | tr '\n' ';')"
+for _p in /opt/data /opt /tmp /run /root; do
+  if touch "$_p/.installhermes-wtest" 2>/dev/null; then
+    log "forensics: WRITE OK: $_p"; rm -f "$_p/.installhermes-wtest"
+  else
+    log "forensics: WRITE FAIL: $_p"
+  fi
+done
+
+# --- HERMES_HOME writability chain (v9.2) ---
+# Upstream hard-requires a writable $HERMES_HOME (stage2 seeds it; the
+# dashboard writes state there). Default = /opt/data (the attached VOLUME).
+# When the backend's attach is unwritable (lease 01a15a53), fall back to the
+# first writable candidate BEFORE cont-init runs; export HERMES_HOME so every
+# consumer (upstream stage2, our cont-init, service spawns) follows it.
+# NOTE the tradeoff: a relocated HOME does not ride the backend volume —
+# buffer containers are disposable by design (the pool replaces them), and
+# the forensics lines above make the relocation loud and diagnosable.
+if [ -z "${HERMES_HOME:-}" ]; then
+  HERMES_HOME=""
+  for _cand in /opt/data /opt/hermes-data /tmp/hermes-data /run/hermes-data; do
+    if mkdir -p "$_cand" 2>/dev/null && touch "$_cand/.installhermes-wtest" 2>/dev/null; then
+      rm -f "$_cand/.installhermes-wtest"
+      HERMES_HOME="$_cand"
+      break
+    fi
+  done
+  if [ -z "$HERMES_HOME" ]; then
+    log "FATAL: no writable HERMES_HOME candidate (see forensics above) — aborting"
+    exit 115
+  fi
+  [ "$HERMES_HOME" = /opt/data ] || \
+    log "WARN: HERMES_HOME relocated to $HERMES_HOME (default /opt/data unwritable on this backend)"
+  export HERMES_HOME
+fi
+
 DROPS_ENABLED=1
 if "$S6_SETUIDGID" hermes /bin/true 2>/dev/null; then
   log "privilege drop to 'hermes' verified — services will run as hermes (normal mode)"
@@ -200,20 +247,22 @@ spawn_service() {
   local name="$1" pid
   case "$name" in
     auth-proxy)
-      HOME=/opt/data "$S6_SETUIDGID" hermes /usr/local/bin/auth-proxy &
+      HOME="$HERMES_HOME" "$S6_SETUIDGID" hermes /usr/local/bin/auth-proxy &
       ;;
     dashboard)
-      # Upstream s6-rc.d/dashboard/run contract: HOME anchored to /opt/data
-      # (with-contenv repopulates HOME as /root — upstream resets it before
-      # the privilege drop), cwd /opt/data, loopback bind, --no-open.
-      # `exec` as the subshell's last command: the & child IS
-      # s6-setuidgid→hermes (single process), so TERM reaches the service
-      # directly (a bare subshell would swallow the signal and orphan it).
-      ( cd /opt/data; HOME=/opt/data exec "$S6_SETUIDGID" hermes hermes dashboard \
-          --host "$HERMES_DASHBOARD_HOST" --port "$HERMES_DASHBOARD_PORT" --no-open ) &
+      # Upstream s6-rc.d/dashboard/run contract: HOME anchored to
+      # $HERMES_HOME (with-contenv repopulates HOME as /root — upstream
+      # resets it before the privilege drop), cwd $HERMES_HOME, loopback
+      # bind, --no-open. --skip-build: serve the dist baked into the image —
+      # never run an npm web-UI build at container boot (unwritable install
+      # trees under read-only backends; faster, deterministic boots).
+      # `exec` as the subshell's last command: the & child IS the final
+      # service process, so TERM reaches it directly.
+      ( cd "$HERMES_HOME"; HOME="$HERMES_HOME" exec "$S6_SETUIDGID" hermes hermes dashboard \
+          --host "$HERMES_DASHBOARD_HOST" --port "$HERMES_DASHBOARD_PORT" --no-open --skip-build ) &
       ;;
     cig-adapter)
-      HOME=/opt/data "$S6_SETUIDGID" hermes /usr/local/bin/cig-adapter &
+      HOME="$HERMES_HOME" "$S6_SETUIDGID" hermes /usr/local/bin/cig-adapter &
       ;;
     *)
       log "FATAL: unknown service $name"
