@@ -1,0 +1,80 @@
+name: smoke-boot
+
+# Boot smoke test for the hermes-hosted image — reproduces the Manifest buffer
+# env shape (minus real secrets) and captures startup logs. SOP-004: no local
+# Docker on the Mac mini; this runs on GitHub runners only.
+
+on:
+  workflow_dispatch:
+    inputs:
+      image:
+        description: "Image tag to smoke (empty = latest)"
+        required: false
+        default: ""
+  push:
+    branches: [main]
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine image
+        id: img
+        run: |
+          TAG="${{ github.event.inputs.image }}"
+          if [ -z "$TAG" ]; then TAG="latest"; fi
+          echo "image=ghcr.io/${{ github.repository }}:$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Run container with buffer-manifest env shape
+        run: |
+          docker run -d --name smoke -p 18789:18789 \
+            -e OPENCLAW_OWNER_ID=buffer-unassigned \
+            -e OPENCLAW_OWNER_EMAIL= \
+            -e OPENCLAW_OWNER_PRIVY_ID=buffer-unassigned \
+            -e VERIFY_OWNER_URL=https://example.invalid/functions/v1/verify-owner \
+            -e VERIFY_OWNER_SECRET=smoke-secret-not-real \
+            -e CONTAINER_FQDN=smoke.invalid \
+            -e HANDOFF_SIGNING_SECRET=smoke-handoff-not-real \
+            -e CONSUME_HANDOFF_URL=https://example.invalid/consume \
+            -e GET_HANDOFF_SECRET_URL=https://example.invalid/get \
+            -e BRAND_NAME=Hermes \
+            -e BRAND_ICON=H \
+            -e BRAND_TAGLINE=smoke \
+            -e EVERCLAW_DEFAULT_MODEL=deepseek-v4-flash-0731 \
+            -e CIG_MINT_URL=https://example.invalid/mint \
+            -e CIG_INFERENCE_URL=https://example.invalid/infer \
+            -e CIG_BINDING_SECRET=0000000000000000000000000000000000000000000000000000000000000000 \
+            -e CIG_CONTAINER_FQDN=smoke.invalid \
+            -e CIG_ALLOWED_FQDN_SUFFIX=.manifest0.net \
+            -e CIG_FAIL_CLOSED=true \
+            -e CIG_ADAPTER_KEY=smoke-adapter-key-not-real \
+            -e HERMES_DASHBOARD=1 \
+            ${{ steps.img.outputs.image }} || true
+
+      - name: Wait, then capture state + logs
+        run: |
+          sleep 45
+          echo "=== docker ps (is it up?) ==="
+          docker ps -a --filter name=smoke --format '{{.Status}}'
+          echo "=== docker logs (FULL boot output) ==="
+          docker logs smoke 2>&1 | head -150 || true
+          echo "=== curl auth-proxy :18789 ==="
+          curl -s -o /dev/null -w "%{http_code}\n" http://localhost:18789/ || echo "curl failed"
+          echo "=== curl cig-adapter :18900 (should fail — loopback only inside container) ==="
+          docker exec smoke curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:18900/healthz || echo "exec/curl failed"
+
+      - name: Always dump logs (failure or success)
+        if: always()
+        run: docker logs smoke 2>&1 | tail -200 || true
