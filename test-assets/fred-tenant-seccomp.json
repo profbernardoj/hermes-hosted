@@ -843,8 +843,8 @@
    "args": [
     {
      "index": 1,
-     "value": "0xC000FFFF",
-     "valueTwo": "0x40006602",
+     "value": 3221291007,
+     "valueTwo": 1073767938,
      "op": "SCMP_CMP_MASKED_EQ"
     }
    ]
@@ -858,8 +858,8 @@
    "args": [
     {
      "index": 1,
-     "value": "0xC000FFFF",
-     "valueTwo": "0x40005820",
+     "value": 3221291007,
+     "valueTwo": 1073764384,
      "op": "SCMP_CMP_MASKED_EQ"
     }
    ]
