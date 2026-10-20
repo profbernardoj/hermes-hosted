@@ -181,6 +181,54 @@ jobs:
           echo "=== smoke-init logs (dispatcher path / stage2 / failure point) ==="
           docker logs smoke-init 2>&1 | head -120 || true
 
+      - name: Tenant-seccomp probe (Fred parity — EPERM on FS_IOC_SETFLAGS / FS_IOC_FSSETXATTR)
+        # Fred applies a tenant seccomp profile (internal/backend/docker/tenantseccomp):
+        # Docker's default profile MINUS the inode-attribute ioctls (FS_IOC_SETFLAGS,
+        # FS_IOC32_SETFLAGS, FS_IOC_FSSETXATTR — denied EPERM via masked-eq on direction/
+        # type/nr) and without file_setattr/file_getattr. s6-overlay ABORTS the container
+        # when any cont-init script fails, so a boot step that touches those ioctls dies
+        # on Fred and lives on plain Docker. test-assets/fred-tenant-seccomp.json
+        # reproduces those exact semantics. INFORMATIONAL: on exit, the logs show the
+        # exact failing boot step.
+        run: |
+          docker rm -f smoke-seccomp 2>/dev/null || true
+          echo "=== docker run --security-opt seccomp=fred-tenant-seccomp.json ==="
+          docker run -d --security-opt seccomp=./test-assets/fred-tenant-seccomp.json --name smoke-seccomp -p 18791:18789 \
+            -e PRIVY_APP_ID=cl-smoke-installhermes-not-real \
+            -e PRIVY_VERIFICATION_KEY=MFkwEw…xw== \
+            -e OPENCLAW_OWNER_ID=buffer-unassigned \
+            -e OPENCLAW_OWNER_EMAIL= \
+            -e OPENCLAW_OWNER_PRIVY_ID=buffer-unassigned \
+            -e VERIFY_OWNER_URL=https://example.invalid/functions/v1/verify-owner \
+            -e VERIFY_OWNER_SECRET=smoke-…real \
+            -e CONTAINER_FQDN=smoke.invalid \
+            -e HANDOFF_SIGNING_SECRET=smoke-…real \
+            -e CONSUME_HANDOFF_URL=https://example.invalid/consume \
+            -e GET_HANDOFF_SECRET_URL=https://example.invalid/get \
+            -e BRAND_NAME=Hermes \
+            -e BRAND_ICON=H \
+            -e BRAND_TAGLINE=smoke \
+            -e EVERCLAW_DEFAULT_MODEL=deepseek-v4-flash-0731 \
+            -e CIG_MINT_URL=https://example.invalid/mint \
+            -e CIG_INFERENCE_URL=https://example.invalid/infer \
+            -e CIG_BINDING_SECRET=000000…0000 \
+            -e CIG_CONTAINER_FQDN=smoke.invalid \
+            -e CIG_ALLOWED_FQDN_SUFFIX=.manifest0.net \
+            -e CIG_FAIL_CLOSED=true \
+            -e CIG_ADAPTER_KEY=smoke-…real \
+            -e HERMES_DASHBOARD=1 \
+            ${{ steps.img.outputs.image }} || true
+          for i in $(seq 1 12); do
+            sleep 20
+            STATE=$(docker inspect --format '{{.State.Status}}' smoke-seccomp 2>/dev/null || echo gone)
+            echo "[t+$((i*20))s] smoke-seccomp state: $STATE"
+            if [ "$STATE" != "running" ]; then break; fi
+          done
+          echo "=== smoke-seccomp inspect ==="
+          docker inspect --format 'ExitCode={{.State.ExitCode}} OOMKilled={{.State.OOMKilled}} Error={{.State.Error}}' smoke-seccomp 2>/dev/null || true
+          echo "=== smoke-seccomp logs (the failing boot step, if any) ==="
+          docker logs smoke-seccomp 2>&1 | head -150 || true
+
       - name: Always dump logs (failure or success)
         if: always()
         run: |
