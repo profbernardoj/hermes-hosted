@@ -64,12 +64,16 @@ jobs:
         #     01a159c1, v8 image 2026.10.20.1417: "s6-applyuidgid: fatal:
         #     unable to set supplementary group list: Operation not permitted",
         #     upstream stage2 died at its first as_hermes(); chown to uid
-        #     10000 EPERM'd the same way). v2 denies the uid/gid + chown/chmod
-        #     family EPERM on top of the v1 ioctl denials. The v8 image FAILS
-        #     this gate (dies at stage2); the v9 entrypoint probes the drop and
-        #     falls back to the baked no-op shim → degraded-root mode → must
-        #     PASS. Any future image that needs the drop to work will fail
-        #     this gate loudly — deliberate, not drift.
+        #     10000 EPERM'd the same way). v2 removes the uid/gid + chown/chmod
+        #     family from the ALLOW rules (defaultAction=ERRNO/EPERM covers
+        #     them) — an ADDED ERRNO rule would conflict with the existing
+        #     allow rule and runc silently drops it on EEXIST, which made the
+        #     first v2 attempt vacuous (run 39442666681: v8 booted, drops
+        #     worked, the gate proved nothing). The v8 image FAILS this gate
+        #     (dies at stage2); the v9 entrypoint probes the drop, falls back
+        #     to the baked no-op shim → DEGRADED-ROOT mode → must PASS with
+        #     all services as root. Any future image that needs the drop to
+        #     work will fail this gate loudly — deliberate, not drift.
         run: |
           docker rm -f smoke 2>/dev/null || true
           docker run -d --name smoke -p 18789:18789 \
