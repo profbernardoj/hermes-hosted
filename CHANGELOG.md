@@ -26,12 +26,29 @@
   `chmod` perform ownership syscalls the backend EPERM's; the merge is now a
   pure read/printf/mv rewrite with `umask 077` (0600 from creation), and the
   chown/chmod re-asserts are fail-soft. config.yaml/SOUL.md chowns likewise.
-- **smoke: the tenant seccomp profile is v2** (adds the uid/gid + chown/chmod
-  family EPERM on top of the v1 ioctl denials) and the MAIN smoke container
-  now carries BOTH Fred-parity gates at once (`--tmpfs /run:rw,noexec` +
-  the v2 profile) — a real lease faces both restrictions simultaneously.
-  v8 dies at stage2 under the v2 profile (proven by dispatch below); v9's
-  degraded-root mode must pass. The gate is permanent.
+- **smoke: the drops-denied gate is `--cap-drop=SETUID,SETGID,CHOWN`** on
+  the MAIN smoke container (alongside `--tmpfs /run:rw,noexec` — a real
+  lease faces both restrictions simultaneously). Cap drops reproduce Fred's
+  exact observed symptoms: setgid()/setuid() to the hermes uid/gid EPERM
+  even as root, chown-to-other EPERM, while runc's own container init is
+  unaffected (USER-root containers need no uid syscalls; setgroups(∅) is
+  cap-free). v8 must FAIL this gate (dies at stage2); v9's degraded-root
+  mode must PASS.
+- **seccomp was abandoned for the drops gate** (documented dead end):
+  adding ERRNO rules for the uid-family conflicts with the profile's
+  existing allow rules and runc silently drops them (run 39442666681 — gate
+  vacuous), while REMOVING them from the allow rules breaks docker 28.0.4
+  itself: every `docker run -p` with the modified profile dies at the
+  daemon netns sandbox ("bind-mount /proc/<pid>/ns/net ->
+  /var/run/docker/netns/<id>: no such file or directory" — 6 runs,
+  restart-proof, ubuntu-24.04 AND 22.04). A same-fleet control dispatch
+  WITHOUT the modified profile passed (run 39449661371 on a temp branch
+  from 507a53f) — the profile content was the trigger. The v1 profile is
+  restored and stays on the informational probe steps only (it has run
+  clean all day).
+- **smoke: docker daemon self-heal step** (restart + `docker info`) before
+  any container run — kept as cheap insurance against runner-daemon state
+  flakes.
 
 ## 2026.10.20 (v8 — no-s6 entrypoint: the Fred /run exec fix)
 

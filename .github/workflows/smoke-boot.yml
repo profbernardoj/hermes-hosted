@@ -82,36 +82,40 @@ jobs:
         #     /run (5/5 leases 2026-10-20: s6 stage0 "exec: /run/s6/basedir/
         #     bin/init: Permission denied", exit 126). s6-overlay v3 cannot
         #     pass this; the v8 entrypoint never execs from /run.
-        #   v9 gate: the tenant seccomp profile (test-assets/fred-tenant-
-        #     seccomp.json, v2) — Fred denies the hermes privilege drop (lease
-        #     01a159c1, v8 image 2026.10.20.1417: "s6-applyuidgid: fatal:
-        #     unable to set supplementary group list: Operation not permitted",
-        #     upstream stage2 died at its first as_hermes(); chown to uid
-        #     10000 EPERM'd the same way). v3 of the profile REMOVES the
-        #     uid/gid + chown/chmod family from the ALLOW rules
-        #     (defaultAction=ERRNO/EPERM covers them) — an ADDED ERRNO rule
-        #     would conflict with the existing allow rule and runc silently
-        #     drops it on EEXIST (first v2 attempt, run 39442666681: v8
-        #     booted, drops worked, gate proved nothing). v3a keeps setgroups
-        #     ALLOWED: runc's container init calls setgroups(∅) to sanitize
-        #     the group list even for USER-root containers — denying it
-        #     killed the container BEFORE the entrypoint (c0a8e0a run
-        #     39446345996: "unable to setup user: setgroups", ExitCode=128),
-        #     while Fred's real sandbox lets the container START and fails
-        #     the drop IN-CONTAINER. With setgroups allowed, the drop still
-        #     fails at setgid/setuid (same failure class; the first-failing
-        #     syscall differs from Fred's setgroups — acceptable, the gate
-        #     models the CONDITION: the hermes drop is impossible + chown/
-        #     chmod denied). The v8 image FAILS this gate (dies at stage2);
-        #     the v9 entrypoint probes the drop, falls back to the baked
-        #     no-op shim → DEGRADED-ROOT mode → must PASS with all services
-        #     as root. Any future image that needs the drop to work will
-        #     fail this gate loudly — deliberate, not drift.
+        #   v9 gate: --cap-drop=SETUID,SETGID,CHOWN — Fred denies the hermes
+        #     privilege drop (lease 01a159c1, v8 image 2026.10.20.1417:
+        #     "s6-applyuidgid: fatal: unable to set supplementary group list:
+        #     Operation not permitted", upstream stage2 died at its first
+        #     as_hermes(); chown to uid 10000 EPERM'd the same way). A
+        #     capability drop reproduces exactly that: setgid()/setuid() to
+        #     another uid/gid EPERMs even as root without CAP_SETGID/SETUID,
+        #     chown-to-other EPERMs without CAP_CHOWN, while runc's own
+        #     container init is unaffected (USER-root containers need no
+        #     uid syscalls; setgroups(∅) is cap-free) — the container STARTS
+        #     and the drop fails IN-CONTAINER, matching Fred. The v8 image
+        #     FAILS this gate (dies at stage2); the v9 entrypoint probes the
+        #     drop, falls back to the baked no-op shim → DEGRADED-ROOT mode
+        #     → must PASS with all services as root. Any future image that
+        #     needs the drop to work will fail this gate loudly — deliberate,
+        #     not drift.
+        #   seccomp was ABANDONED for this gate: denying the uid-family by
+        #     profile surgery breaks docker 28.0.4 itself — every `docker
+        #     run -p` with the modified profile dies at the DAEMON netns
+        #     sandbox ("bind-mount /proc/<pid>/ns/net -> /var/run/docker/
+        #     netns/<id>: no such file or directory"; adding ERRNO rules
+        #     conflicts with existing allow rules and runc silently drops
+        #     them — run 39442666681 — while REMOVING them from the allow
+        #     rules kills netns — runs 39447143759/39447679003/39448461240/
+        #     39448511904/39448983111/39449002604, restart-proof, both
+        #     ubuntu-24.04 and 22.04, docker 28.0.4). The unmodified v1
+        #     profile (below, probe steps only) has run clean all day. A
+        #     same-fleet control run WITHOUT the modified profile passed
+        #     (run 39449661371) — the profile content was the trigger.
         run: |
           docker rm -f smoke 2>/dev/null || true
           docker run -d --name smoke -p 18789:18789 \
             --tmpfs /run:rw,noexec,size=64m \
-            --security-opt seccomp=./test-assets/fred-tenant-seccomp.json \
+            --cap-drop=SETUID,SETGID,CHOWN \
             -e PRIVY_APP_ID=cl-smoke-installhermes-not-real \
             -e PRIVY_VERIFICATION_KEY=MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEeF3cphhczAWSVDSNDib+kjVWSz0V2WEC5mn4EdRzdn8Jti3bhQMNaM422u9wSMLrQOr/ez2dBtjhiLirG7Gexw== \
             -e OPENCLAW_OWNER_ID=buffer-unassigned \
