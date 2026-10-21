@@ -606,6 +606,18 @@ const proxy = httpProxy.createProxyServer({
   target: `http://127.0.0.1:${CONFIG.internalPort}`,
   ws: true,
   xfwd: true,
+  // 2026-10-21 incident (v9.2.4): hermes dashboard (FastAPI host_header_middleware,
+  // DNS-rebinding guard GHSA-ppp5-vxwm-4cf7) rejects any Host that is not its
+  // bound host (127.0.0.1) or the config-declared dashboard.public_url — and we
+  // deliberately never set public_url (a non-loopback public hostname engages
+  // the dashboard's own ticket gate, which would lock out the Privy auth-proxy
+  // front door). Forwarding the browser's Host (the lease FQDN) therefore
+  // 400s with "Invalid Host header" after a dashboard restart. changeOrigin
+  // rewrites Host to the target (127.0.0.1:9119 = the bound host) on every
+  // proxied request AND websocket upgrade — deterministic acceptance, gate
+  // stays disengaged, and the original client identity still travels in the
+  // X-Forwarded-* headers (xfwd).
+  changeOrigin: true,
 });
 // Note (verified 2026-09-10): this ProxyServer is NOT a node
 // EventEmitter instance — http-proxy ships a custom emitter shim (on/once/

@@ -217,3 +217,18 @@
 - brandName default 'OpenClaw' → 'Hermes' (server.mjs:82); manifest always
   supplies BRAND_NAME=Hermes, but the fallback must not leak the old brand.
 - "Bad Gateway — OpenClaw may still be starting" → brand-aware string.
+
+## 2026.10.21 (v9.2.4 — dashboard Host fix)
+
+### Fixed
+- **"Invalid Host header. Dashboard requests must use the bound hostname or the
+  configured public hostname"** (400 JSON) on every authenticated page after a
+  dashboard restart: the auth-proxy forwarded the browser's Host (the lease
+  FQDN) to the hermes dashboard, whose host_header_middleware (DNS-rebinding
+  guard) only accepts its bound host or dashboard.public_url. We deliberately
+  never set public_url — a non-loopback public hostname engages the dashboard's
+  own ticket gate and would lock out the Privy auth-proxy front door.
+  Fix: `changeOrigin: true` on the reverse proxy — every proxied request (and
+  WS upgrade) presents Host: 127.0.0.1:<port> (the bound host). Deterministic
+  acceptance across dashboard restarts; client identity still travels in the
+  X-Forwarded-* headers (xfwd: true).
