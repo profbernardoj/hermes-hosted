@@ -206,3 +206,14 @@
   "Powered by Privy". OpenClaw strings removed from all user-visible surfaces
   (title, footer). The generic "Your agent. Your inference. Your data." footer
   line is vertical-neutral and stays.
+
+## 2026.10.21 (v9.2.3 — Privy modal logo + brand strings)
+
+### Fixed
+- **Privy login modal showed the OpenClaw wordmark** (auth-proxy/assets/logo.png,
+  the inherited everclaw 500x110 logo, wired via login-app.jsx appearance.logo
+  → /auth/logo.png). Replaced with the Hermes lockup: indigo→violet rounded
+  icon + white "Hermes" wordmark (transparent, dark-theme modal safe).
+- brandName default 'OpenClaw' → 'Hermes' (server.mjs:82); manifest always
+  supplies BRAND_NAME=Hermes, but the fallback must not leak the old brand.
+- "Bad Gateway — OpenClaw may still be starting" → brand-aware string.

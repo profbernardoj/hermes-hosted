@@ -79,7 +79,7 @@ const CONFIG = {
   // Consume-handoff endpoint (Supabase Edge Function) for DB-backed single-use enforcement
   consumeHandoffUrl: process.env.CONSUME_HANDOFF_URL || '',
   // Login-page branding (set by provisioner; lobster is the OpenClaw default)
-  brandName: process.env.BRAND_NAME || 'OpenClaw',
+  brandName: process.env.BRAND_NAME || 'Hermes',
   brandIcon: process.env.BRAND_ICON || '🦞',
   brandTagline: process.env.BRAND_TAGLINE || 'Your sovereign AI agent',
 };
@@ -701,7 +701,7 @@ function sendFinalBootError(req, res) {
     serveBootPageBody(res);
   } else {
     res.writeHead(502, { 'Content-Type': 'text/plain' });
-    res.end('Bad Gateway — OpenClaw may still be starting');
+    res.end(`Bad Gateway — ${CONFIG.brandName} may still be starting`);
   }
 }
 
