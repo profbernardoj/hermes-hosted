@@ -194,3 +194,15 @@
   services; the base image's own main-wrapper rehydrates via `with-contenv`).
   Both service run scripts now wrap with `/command/with-contenv` — without it
   CIG_*/BRAND_*/HANDOFF_* env was invisible to auth-proxy and cig-adapter.
+
+## 2026.10.21 (v9.2.2 — login page brand cleanup)
+
+### Fixed
+- **Login page title was static "OpenClaw — Sign In"** (login.html:6): the serve-time
+  template replacement already handles `__BRAND_NAME__` (server.mjs loadLoginPage),
+  but the <title> tag was hardcoded OpenClaw. Now `__BRAND_NAME__ — Sign In`
+  → serves "Hermes — Sign In" for the Hermes vertical.
+- **Footer attribution "Powered by OpenClaw & Privy"** (login.html:151) →
+  "Powered by Privy". OpenClaw strings removed from all user-visible surfaces
+  (title, footer). The generic "Your agent. Your inference. Your data." footer
+  line is vertical-neutral and stays.
