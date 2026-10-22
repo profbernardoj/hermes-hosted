@@ -692,6 +692,12 @@ function proxyWithBootRetry(req, res) {
     const attemptProxy = httpProxy.createProxyServer({
       target: `http://127.0.0.1:${CONFIG.internalPort}`,
       xfwd: true,
+      // v9.2.5: same fix as the module-level proxy — this per-attempt instance
+      // serves ALL authenticated HTTP requests (proxyWithBootRetry is the real
+      // page path; the module-level proxy only handles WS upgrades). Without
+      // changeOrigin it forwards the browser's Host (the lease FQDN) and the
+      // dashboard's host_header_middleware 400s: "Invalid Host header".
+      changeOrigin: true,
     });
     attemptProxy.on('error', onError);
     try {

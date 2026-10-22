@@ -232,3 +232,15 @@
   WS upgrade) presents Host: 127.0.0.1:<port> (the bound host). Deterministic
   acceptance across dashboard restarts; client identity still travels in the
   X-Forwarded-* headers (xfwd: true).
+
+## 2026.10.21 (v9.2.5 — the actual page-path Host fix)
+
+### Fixed
+- **v9.2.4 patched the wrong proxy instance.** The module-level
+  `httpProxy.createProxyServer` (now with changeOrigin) only serves WebSocket
+  upgrades (`proxy.ws`). ALL authenticated HTTP page requests flow through the
+  per-attempt proxy created inside `proxyWithBootRetry` — which still forwarded
+  the browser's Host (the lease FQDN) and kept 400ing with "Invalid Host
+  header" after the dashboard's host_header_middleware check. This change adds
+  `changeOrigin: true` to the per-attempt instance: every page request now
+  presents Host: 127.0.0.1:<port> (the dashboard's bound host).
