@@ -244,3 +244,21 @@
   header" after the dashboard's host_header_middleware check. This change adds
   `changeOrigin: true` to the per-attempt instance: every page request now
   presents Host: 127.0.0.1:<port> (the dashboard's bound host).
+
+## 2026.10.21 (v9.3.0 — CIG model re-assertion)
+
+### Fixed
+- **Chat unavailable after onboarding: Main Model reset to Anthropic/Claude-Opus-4.6
+  (upstream default, keyless in the hosted container).** The hermes onboarding/
+  dashboard rewrites config.yaml after first use and drops our marker, so the
+  pre-v9.3.0 "never clobber user edits" rule preserved the broken model on
+  every rebuild. The model is infrastructure-owned (CIG-only inference):
+  cont-init now surgically re-asserts the TOP-LEVEL `model:` line on EVERY
+  boot (sed-free read/printf/mv per v9 Fred restrictions), preserving all
+  other user config.
+- **Fresh configs now use the runtime's canonical schema** — top-level
+  `model: "<id>"` string (v0.22.2 DEFAULT_CONFIG), not the legacy nested
+  `model: {default: ...}` form the pre-v9.3.0 script wrote.
+- Model id: deepseek-v4-flash-0731 (CIG allowlist bare name, from
+  EVERCLAW_DEFAULT_MODEL). Verified by local harness: top-level line replaced,
+  nested aux-block `model:` keys and personality preserved; appended when absent.

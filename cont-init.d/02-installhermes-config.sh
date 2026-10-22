@@ -93,21 +93,43 @@ SEEN_KEY=0
 chown hermes:hermes "$ENV_FILE" 2>/dev/null || true
 chmod 600 "$ENV_FILE" 2>/dev/null || true
 
-# --- config.yaml: model default + persona basics ---
-# Only written when absent or previously written by us (never clobber user edits
-# on a restored volume). Written AS hermes: the user may edit it at runtime.
+# --- config.yaml: model default + persona basics (v9.3.0) ---
+# TWO rules:
+# (1) Fresh/marker configs are written in the runtime's CANONICAL schema:
+#     top-level `model: "<id>"` string (v0.22.2 DEFAULT_CONFIG keys are
+#     `model` string + `providers` dict), NOT the legacy nested
+#     `model: {default: ...}` form the pre-v9.3.0 script wrote.
+# (2) USER-MANAGED configs (the hermes onboarding/dashboard rewrites the
+#     file after first use and drops our marker): surgically re-assert the
+#     TOP-LEVEL model line on EVERY boot. The hosted product's inference is
+#     CIG-only — an onboarding-set Main Model pointing at a keyless provider
+#     (e.g. anthropic/claude-*) leaves chat unavailable. The model is
+#     infrastructure-owned; every other user edit is preserved untouched.
+#     Sed-free read/printf/mv per v9 Fred restrictions (no GNU sed -i, no
+#     bare chmod — ownership syscalls EPERM).
 if [ ! -f "$CONFIG_FILE" ] || grep -q "Managed by hermes-hosted" "$CONFIG_FILE"; then
 cat > "$CONFIG_FILE" <<EOF
 # Managed by hermes-hosted (installhermes.ai) — regenerated at boot.
-model:
-  default: ${DEFAULT_MODEL}
+model: ${DEFAULT_MODEL}
 
 personality:
   name: ${AGENT_NAME}
 EOF
   chown hermes:hermes "$CONFIG_FILE" 2>/dev/null || true
 else
-  echo "[installhermes] $CONFIG_FILE exists (user-managed) — leaving untouched"
+  echo "[installhermes] $CONFIG_FILE exists (user-managed) — re-asserting model=${DEFAULT_MODEL} (v9.3.0)"
+  _MODEL_TMP="${CONFIG_FILE}.v930tmp.$$"
+  ( umask 077
+    _SEEN_MODEL=0
+    while IFS= read -r _line || [ -n "$_line" ]; do
+      case "$_line" in
+        "model:"|"model: "*) printf 'model: %s\n' "$DEFAULT_MODEL"; _SEEN_MODEL=1 ;;
+        *) printf '%s\n' "$_line" ;;
+      esac
+    done < "$CONFIG_FILE"
+    [ "$_SEEN_MODEL" = 1 ] || printf 'model: %s\n' "$DEFAULT_MODEL"
+  ) > "$_MODEL_TMP" && mv "$_MODEL_TMP" "$CONFIG_FILE"
+  chown hermes:hermes "$CONFIG_FILE" 2>/dev/null || true
 fi
 
 # --- SOUL.md persona (only when absent — user may evolve it later) ---
