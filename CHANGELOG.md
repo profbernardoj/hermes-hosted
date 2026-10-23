@@ -1,5 +1,51 @@
 # Changelog
 
+## 2026.10.23 (v9.3.1 — CRITICAL: repair the v9.3.0 model re-assert that corrupted config.yaml fleet-wide)
+
+### Incident
+- **Chat dead fleet-wide on image 2026.10.22.307 (v9.3.0)** — every warm buffer
+  AND the live deployment. Symptom: dashboard "Gateway Status: Off", chat
+  terminal "reconnecting", Models page shows `anthropic/claude-opus-4.6`
+  (keyless — chat unavailable). Root cause (E2E, Oct 23, lease 01a166bd):
+  the runtime seeds config.yaml from the upstream EXAMPLE template, whose
+  `model` key is a NESTED block (`model:` + indented `default:`/comments).
+  v9.3.0's re-assert replaced only the `model:` header line with a scalar,
+  orphaning the children — `expected <block end>, but found '<block mapping
+  start>'` at line 75 → the gateway refuses to start. The corrupted file was
+  verified byte-for-byte via the live dashboard Config page.
+
+### Fixed
+- **Re-assert now consumes the ENTIRE nested model block**: after ANY
+  top-level `model:` line (bare header or scalar), indented children, blank
+  lines and comments are consumed until the next top-level key — repairing
+  both the legacy nested form AND the v9.3.0 orphaned-scalar shape in place.
+- **Candidate-then-validate-then-mv discipline**: the rewritten config is
+  parsed with PyYAML (hermes venv python first, then system) BEFORE it
+  replaces the live file; on failure the ORIGINAL is kept untouched and the
+  candidate preserved as `config.yaml.rejected.<ts>`.
+- **Fresh-branch hardening**: agent names are stripped of YAML-hostile
+  characters via a byte-preserving DELETE set (quote/backslash/CR/LF — CJK
+  names like ひまわり survive; an allowlist would mangle them in the C
+  locale), the fresh write is validated the same way, and a failure falls
+  back to a model-only config (valid by construction).
+- **Tab-correct indentation matching** (real tab via printf, not the literal
+  `\t`), duplicate top-level `model:` keys collapse to one, `model:<TAB>`
+  form matched.
+
+### Tests
+- `tests/test-v931-model-reassert.sh` — 14 cases, all passing: production
+  corrupt shape, legacy nested, scalar swap, append-when-missing, unrelated
+  nested `default:` preserved, block-at-EOF, tab orphans, fresh branch with
+  hostile/CJK/newline names, duplicate keys, col-1 comment inside block,
+  idempotency.
+
+### Audit
+- Grok 4.20 reasoning R1: FIX_REQUIRED (3 blockers: literal-\t pattern,
+  post-mv validation, unquoted heredoc) → all fixed → **R2: SHIP**.
+- Claude Opus 4.8 R1: FIX_REQUIRED (2 blockers: fresh-branch injection,
+  conditional python) → all fixed → **R2: SHIP** (5 nonblocking, two taken:
+  CJK/newline name handling).
+
 ## 2026.10.20 (v9.2 — HERMES_HOME writability chain + boot forensics: Fred restriction #3)
 
 ### Fixed

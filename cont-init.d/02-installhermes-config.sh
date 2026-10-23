@@ -93,42 +93,120 @@ SEEN_KEY=0
 chown hermes:hermes "$ENV_FILE" 2>/dev/null || true
 chmod 600 "$ENV_FILE" 2>/dev/null || true
 
-# --- config.yaml: model default + persona basics (v9.3.0) ---
-# TWO rules:
+# --- config.yaml: model default + persona basics (v9.3.1) ---
+# THREE rules:
 # (1) Fresh/marker configs are written in the runtime's CANONICAL schema:
 #     top-level `model: "<id>"` string (v0.22.2 DEFAULT_CONFIG keys are
 #     `model` string + `providers` dict), NOT the legacy nested
 #     `model: {default: ...}` form the pre-v9.3.0 script wrote.
-# (2) USER-MANAGED configs (the hermes onboarding/dashboard rewrites the
-#     file after first use and drops our marker): surgically re-assert the
+# (2) USER-MANAGED configs (the runtime seeds config.yaml from the upstream
+#     EXAMPLE template on first boot — 2334 lines, marker dropped — and the
+#     onboarding/dashboard rewrite it later): surgically re-assert the
 #     TOP-LEVEL model line on EVERY boot. The hosted product's inference is
-#     CIG-only — an onboarding-set Main Model pointing at a keyless provider
-#     (e.g. anthropic/claude-*) leaves chat unavailable. The model is
-#     infrastructure-owned; every other user edit is preserved untouched.
+#     CIG-only — a Main Model pointing at a keyless provider (e.g.
+#     anthropic/claude-*, the template default) leaves chat unavailable.
+#     The model is infrastructure-owned; every other user edit is preserved.
+# (3) v9.3.1 OCT-23 OUTAGE FIX: the template's model key is a NESTED block
+#     (`model:` header + indented children: default/provider/...). v9.3.0
+#     replaced only the header line with a scalar, orphaning the children —
+#     "expected <block end>, but found '<block mapping start>'" at the
+#     first child → runtime falls back to template defaults → gateway
+#     refuses to start → chat dead fleet-wide (all 307 buffers + the live
+#     deployment). The re-assert now consumes the ENTIRE nested block
+#     (and any orphans already left behind by v9.3.0) and re-emits the
+#     single scalar. Post-write YAML validation guards the result.
 #     Sed-free read/printf/mv per v9 Fred restrictions (no GNU sed -i, no
 #     bare chmod — ownership syscalls EPERM).
 if [ ! -f "$CONFIG_FILE" ] || grep -q "Managed by hermes-hosted" "$CONFIG_FILE"; then
+  # v9.3.1 (Opus R1 #1 + R2 NB1/NB2): the name is user-chosen at signup —
+  # DELETE only the YAML-hostile characters (double quote, backslash, CR,
+  # LF) instead of allowlisting: an allowlist in the C locale would strip
+  # UTF-8 continuation bytes (CJK names like ひまわり would mangle to
+  # empty), while a delete-set is byte-preserving for every other character.
+  # Quoted YAML scalars tolerate : # [ ] etc., so only quotes/backslashes/
+  # newlines must go. The output is additionally validated below.
+  _NAME_SAFE="$(printf '%s' "${AGENT_NAME}" | tr -d '"\\\n\r')"
+  [ -n "$_NAME_SAFE" ] || _NAME_SAFE="Hermes"
 cat > "$CONFIG_FILE" <<EOF
 # Managed by hermes-hosted (installhermes.ai) — regenerated at boot.
-model: ${DEFAULT_MODEL}
+model: "${DEFAULT_MODEL}"
 
 personality:
-  name: ${AGENT_NAME}
+  name: "${_NAME_SAFE}"
 EOF
+  # v9.3.1 (Opus R1 #1): validate the fresh write too — same candidate
+  # discipline as the re-assert. On failure (or when no python+yaml exists),
+  # fall back to the model-only config, which is valid by construction
+  # (DEFAULT_MODEL is infrastructure-controlled and charset-safe).
+  _PY=""
+  for _cand in /opt/hermes/.venv/bin/python /opt/hermes/.venv/bin/python3 "$(command -v python3 2>/dev/null)"; do
+    [ -n "$_cand" ] && [ -x "$_cand" ] && "$_cand" -c 'import yaml' 2>/dev/null && { _PY="$_cand"; break; }
+  done
+  if [ -n "$_PY" ] \
+     && ! "$_PY" -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' "$CONFIG_FILE" 2>/dev/null; then
+    echo "[installhermes] WARNING: fresh config failed YAML validation — falling back to model-only config"
+    printf 'model: "%s"\n' "$DEFAULT_MODEL" > "$CONFIG_FILE"
+  fi
   chown hermes:hermes "$CONFIG_FILE" 2>/dev/null || true
 else
-  echo "[installhermes] $CONFIG_FILE exists (user-managed) — re-asserting model=${DEFAULT_MODEL} (v9.3.0)"
-  _MODEL_TMP="${CONFIG_FILE}.v930tmp.$$"
+  echo "[installhermes] $CONFIG_FILE exists (user-managed) — re-asserting model=${DEFAULT_MODEL} (v9.3.1)"
+  _MODEL_TMP="${CONFIG_FILE}.v931tmp.$$"
+  _TAB="$(printf '\t')"
   ( umask 077
     _SEEN_MODEL=0
+    _SKIP_BLOCK=0
     while IFS= read -r _line || [ -n "$_line" ]; do
+      if [ "$_SKIP_BLOCK" = 1 ]; then
+        # v9.3.1: consuming a legacy nested model block (or the orphans a
+        # v9.3.0 flatten left behind). Drop indented children, blank lines
+        # AND comments until the next top-level KEY (column 1, non-comment —
+        # a column-1 comment inside the block must not end it, or the
+        # children after it would be orphaned again; Opus R1 nonblocking).
+        # NOTE: "$_TAB" is a REAL tab (printf-built) — the literal \t inside
+        # double quotes is backslash-t, not a tab (Grok R1 finding #1).
+        case "$_line" in
+          ""|" "*|"$_TAB"*|"#"*) continue ;;
+          *) _SKIP_BLOCK=0 ;;
+        esac
+      fi
       case "$_line" in
-        "model:"|"model: "*) printf 'model: %s\n' "$DEFAULT_MODEL"; _SEEN_MODEL=1 ;;
+        # ANY top-level model line — bare "model:" (header of the legacy
+        # nested block that upstream onboarding rewrites config.yaml into)
+        # or "model: <value>" (scalar). Both are replaced with our scalar,
+        # and BOTH enter skip mode: a scalar can never own indented children
+        # in valid YAML, so any following indented lines are block orphans —
+        # exactly the "expected <block end>, but found '<block mapping
+        # start>'" corruption that killed chat fleet-wide (Oct 23 outage:
+        # v9.3.0 flattened the header but left the children).
+        "model:"|"model: "*|"model:$_TAB"*)
+          if [ "$_SEEN_MODEL" = 0 ]; then
+            printf 'model: "%s"\n' "$DEFAULT_MODEL"
+          fi
+          _SEEN_MODEL=1; _SKIP_BLOCK=1 ;;
         *) printf '%s\n' "$_line" ;;
       esac
     done < "$CONFIG_FILE"
-    [ "$_SEEN_MODEL" = 1 ] || printf 'model: %s\n' "$DEFAULT_MODEL"
-  ) > "$_MODEL_TMP" && mv "$_MODEL_TMP" "$CONFIG_FILE"
+    [ "$_SEEN_MODEL" = 1 ] || printf 'model: "%s"\n' "$DEFAULT_MODEL"
+  ) > "$_MODEL_TMP"
+  # v9.3.1 (Grok R1 finding #2): validate the CANDIDATE before it goes live.
+  # PyYAML lives in the hermes venv, not necessarily the system python —
+  # try venv then system. When the candidate parses, mv it into place. When
+  # it FAILS, the ORIGINAL file is left exactly as we found it (never worse)
+  # and the candidate is preserved as .rejected for forensics. When no
+  # python+yaml exists at all, fall back to the unconditional mv (the
+  # runtime's own parser remains the final authority).
+  _PY=""
+  for _cand in /opt/hermes/.venv/bin/python /opt/hermes/.venv/bin/python3 "$(command -v python3 2>/dev/null)"; do
+    [ -n "$_cand" ] && [ -x "$_cand" ] && "$_cand" -c 'import yaml' 2>/dev/null && { _PY="$_cand"; break; }
+  done
+  if [ -n "$_PY" ] \
+     && ! "$_PY" -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' "$_MODEL_TMP" 2>/dev/null; then
+    _REJ="${CONFIG_FILE}.rejected.$(date +%Y%m%d%H%M%S)"
+    mv "$_MODEL_TMP" "$_REJ" 2>/dev/null || true
+    echo "[installhermes] WARNING: re-assert produced unparseable YAML — original kept, candidate preserved at $_REJ"
+  else
+    mv "$_MODEL_TMP" "$CONFIG_FILE"
+  fi
   chown hermes:hermes "$CONFIG_FILE" 2>/dev/null || true
 fi
 
