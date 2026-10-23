@@ -619,6 +619,23 @@ const proxy = httpProxy.createProxyServer({
   // X-Forwarded-* headers (xfwd).
   changeOrigin: true,
 });
+// 2026-10-23 incident (v9.3.2): the SAME DNS-rebinding guard family also
+// validates the ORIGIN header on the dashboard's WS endpoints (pty/ws/events).
+// changeOrigin rewrites Host but NOT Origin — the browser's Origin (the lease
+// FQDN) was forwarded verbatim and hermes_cli.web_server refused every chat
+// attach: "pty refused: origin_mismatch origin=https://<fqdn> bound=127.0.0.1"
+// → chat terminal stuck on "reconnecting" forever (all hermes containers).
+// Rewrite Origin to the bound origin when the client sends one (same
+// trust model as changeOrigin: the Privy auth-proxy is the only ingress; the
+// dashboard binds loopback; the true client origin stays in X-Forwarded-*).
+const BOUND_ORIGIN = `http://127.0.0.1:${CONFIG.internalPort}`;
+proxy.on('proxyReq', rewriteOriginHeader);
+proxy.on('proxyReqWs', rewriteOriginHeader);
+function rewriteOriginHeader(proxyReq, req) {
+  if (req.headers['origin']) {
+    proxyReq.setHeader('Origin', BOUND_ORIGIN);
+  }
+}
 // Note (verified 2026-09-10): this ProxyServer is NOT a node
 // EventEmitter instance — http-proxy ships a custom emitter shim (on/once/
 // removeListener only, no setMaxListeners, no default-10 warning logic), so
@@ -699,6 +716,9 @@ function proxyWithBootRetry(req, res) {
       // dashboard's host_header_middleware 400s: "Invalid Host header".
       changeOrigin: true,
     });
+    // v9.3.2: rewrite Origin on the HTTP page path too (same guard family —
+    // the dashboard validates Origin on its API endpoints, not just PTY).
+    attemptProxy.on('proxyReq', rewriteOriginHeader);
     attemptProxy.on('error', onError);
     try {
       attemptProxy.web(req, res);

@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026.10.23 (v9.3.2 — chat unblock: auth-proxy rewrites Origin to the bound origin)
+
+### Fixed
+- **Chat terminal could never attach** (all hermes containers): the upstream
+  dashboard validates the ORIGIN header on its WS endpoints (same
+  DNS-rebinding guard family as the v9.2.4/9.2.5 Host-header fix).
+  changeOrigin rewrites Host but NOT Origin — the browser's Origin (the lease
+  FQDN) was forwarded verbatim and every PTY/WS attach was refused:
+  `pty refused: origin_mismatch origin=https://<fqdn> bound=127.0.0.1`
+  (verified live via the dashboard Logs page, lease 01a166bd). The chat
+  terminal stuck on "reconnecting" forever; sessions never persisted.
+- **Fix**: both proxies (module-level WS + per-attempt HTTP page path) now
+  rewrite `Origin` to the bound origin (`http://127.0.0.1:<internalPort>`)
+  when the client sends one. Same trust model as changeOrigin: the Privy
+  auth-proxy is the only ingress, the dashboard binds loopback, and the
+  true client identity travels in X-Forwarded-* (xfwd).
+
 ## 2026.10.23 (v9.3.1 — CRITICAL: repair the v9.3.0 model re-assert that corrupted config.yaml fleet-wide)
 
 ### Incident
