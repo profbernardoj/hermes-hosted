@@ -43,7 +43,8 @@ path, dm = sys.argv[1], sys.argv[2]
 with open(path) as f:
     doc = yaml.safe_load(f)
 assert isinstance(doc, dict), "not a mapping"
-assert doc.get("model") == dm, f"model={doc.get('model')!r}"
+m = doc.get("model")
+assert (m == dm if isinstance(m, str) else m.get("default") == dm and m.get("api_mode") == "chat_completions"), f"model={m!r}"
 PY
   then :; else echo "FAIL($name): YAML invalid or model wrong"; FAIL=1; return; fi
 }
@@ -156,7 +157,8 @@ printf '# Managed by hermes-hosted (installhermes.ai) — regenerated at boot.\n
 if ! python3 - "$TMP/h.home/config.yaml" <<'PY'
 import sys, yaml
 doc = yaml.safe_load(open(sys.argv[1]))
-assert doc["model"] == "deepseek-v4-flash-0731", doc["model"]
+m = doc["model"]
+assert (m == "deepseek-v4-flash-0731" if isinstance(m, str) else m.get("default") == "deepseek-v4-flash-0731" and m.get("api_mode") == "chat_completions"), repr(m)
 # v9.3.1 deletes only quotes/backslashes/newlines: : and # survive
 assert doc["personality"]["name"] == "Weird: Name #1", doc["personality"]
 PY
@@ -177,7 +179,8 @@ rm -f "$TMP/i.home/config.yaml"
 if ! python3 - "$TMP/i.home/config.yaml" <<'PY'
 import sys, yaml
 doc = yaml.safe_load(open(sys.argv[1]))
-assert doc["model"] == "deepseek-v4-flash-0731"
+_m = doc["model"]
+assert (_m == "deepseek-v4-flash-0731" if isinstance(_m, str) else _m.get("default") == "deepseek-v4-flash-0731" and _m.get("api_mode") == "chat_completions"), repr(_m)
 assert isinstance(doc.get("personality", {}).get("name"), str)
 PY
 then echo "FAIL(i): hostile name broke fresh config"; FAIL=1
@@ -222,7 +225,8 @@ if ! python3 - "$TMP/l.home/config.yaml" <<'PY'
 import sys, yaml
 doc = yaml.safe_load(open(sys.argv[1]))
 assert doc["personality"]["name"] == "ひまわり", repr(doc["personality"]["name"])
-assert doc["model"] == "deepseek-v4-flash-0731"
+_m = doc["model"]
+assert (_m == "deepseek-v4-flash-0731" if isinstance(_m, str) else _m.get("default") == "deepseek-v4-flash-0731" and _m.get("api_mode") == "chat_completions"), repr(_m)
 PY
 then echo "FAIL(l): CJK name did not survive"; FAIL=1
 fi
@@ -234,7 +238,8 @@ Name' sh "$SCRIPT" ) > "$TMP/m.log" 2>&1
 if ! python3 - "$TMP/m.home/config.yaml" <<'PY'
 import sys, yaml
 doc = yaml.safe_load(open(sys.argv[1]))
-assert doc["model"] == "deepseek-v4-flash-0731"
+_m = doc["model"]
+assert (_m == "deepseek-v4-flash-0731" if isinstance(_m, str) else _m.get("default") == "deepseek-v4-flash-0731" and _m.get("api_mode") == "chat_completions"), repr(_m)
 PY
 then echo "FAIL(m): newline name broke fresh config"; FAIL=1
 fi

@@ -1,5 +1,32 @@
 # Changelog
 
+## 2026.10.23 (v9.3.3 — CRITICAL: pin api_mode chat_completions — hermes v0.22.2 calls /v1/responses on custom endpoints)
+
+### Incident
+- **Buffer agents' model calls 404** (final chat blocker, found in the Oct-23
+  live E2E): hermes v0.22.2 routes the `openai-api` provider — used for ANY
+  custom `OPENAI_BASE_URL` endpoint — through the OpenAI **Responses API**
+  (`hermes_cli/providers.py`: `openai-api` overlay transport
+  `codex_responses`). Our loopback cig-adapter serves only
+  `/v1/models` + `/v1/chat/completions`, so the turn fails:
+  `Provider said: HTTP 404: not found: /v1/responses`
+  ("OpenAI API didn't answer after 3 attempts").
+
+### Fixed
+- The model block now carries **`api_mode: chat_completions`** — the upstream
+  pin (`runtime_provider.explicit_api_mode` honors a persisted chat mode
+  unconditionally; only `codex_responses` is ignored on non-OpenAI hosts).
+  Fresh configs AND every-boot re-assertions write:
+  `model:\n  default: "<id>"\n  api_mode: chat_completions`.
+  Block form chosen over the top-level scalar (both valid; the block is the
+  only form that can carry the pin). The v9.3.1 whole-block consumption
+  stays; idempotent on its own output.
+
+### Tests
+- 14/14 harness cases re-verified against the block form (production-corrupt
+  shape, legacy nested, scalar swap, append, tab orphans, hostile/CJK/
+  newline names, duplicate keys, col-1 comment in block, idempotency).
+
 ## 2026.10.23 (v9.3.2 — chat unblock: auth-proxy rewrites Origin to the bound origin)
 
 ### Fixed

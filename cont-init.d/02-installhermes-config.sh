@@ -93,28 +93,31 @@ SEEN_KEY=0
 chown hermes:hermes "$ENV_FILE" 2>/dev/null || true
 chmod 600 "$ENV_FILE" 2>/dev/null || true
 
-# --- config.yaml: model default + persona basics (v9.3.1) ---
-# THREE rules:
-# (1) Fresh/marker configs are written in the runtime's CANONICAL schema:
-#     top-level `model: "<id>"` string (v0.22.2 DEFAULT_CONFIG keys are
-#     `model` string + `providers` dict), NOT the legacy nested
-#     `model: {default: ...}` form the pre-v9.3.0 script wrote.
-# (2) USER-MANAGED configs (the runtime seeds config.yaml from the upstream
-#     EXAMPLE template on first boot — 2334 lines, marker dropped — and the
-#     onboarding/dashboard rewrite it later): surgically re-assert the
-#     TOP-LEVEL model line on EVERY boot. The hosted product's inference is
-#     CIG-only — a Main Model pointing at a keyless provider (e.g.
-#     anthropic/claude-*, the template default) leaves chat unavailable.
-#     The model is infrastructure-owned; every other user edit is preserved.
-# (3) v9.3.1 OCT-23 OUTAGE FIX: the template's model key is a NESTED block
-#     (`model:` header + indented children: default/provider/...). v9.3.0
-#     replaced only the header line with a scalar, orphaning the children —
-#     "expected <block end>, but found '<block mapping start>'" at the
-#     first child → runtime falls back to template defaults → gateway
-#     refuses to start → chat dead fleet-wide (all 307 buffers + the live
-#     deployment). The re-assert now consumes the ENTIRE nested block
-#     (and any orphans already left behind by v9.3.0) and re-emits the
-#     single scalar. Post-write YAML validation guards the result.
+# --- config.yaml: model default + persona basics (v9.3.3) ---
+# FOUR rules:
+# (1) Fresh/marker configs are written with the model BLOCK form:
+#     `model:\n  default: "<id>"\n  api_mode: chat_completions`. Both the
+#     top-level string and the nested block are valid v0.22.2 schema (the
+#     upstream example template itself uses the block).
+# (2) USER-MANAGED configs: surgically re-assert the model block on EVERY
+#     boot. The model is infrastructure-owned (CIG-only inference); every
+#     other user edit is preserved.
+# (3) v9.3.1 OCT-23 OUTAGE FIX: the template's model key is a NESTED block.
+#     v9.3.0 replaced only the header line with a scalar, orphaning the
+#     children — "expected <block end>, but found '<block mapping start>'"
+#     → gateway dead fleet-wide. The re-assert consumes the ENTIRE nested
+#     block and re-emits our canonical block. Post-write PyYAML validation
+#     guards the result (candidate-then-mv).
+# (4) v9.3.3 WIRE-PIN: hermes v0.22.2 routes the `openai-api` provider (any
+#     custom OPENAI_BASE_URL endpoint) through the OpenAI RESPONSES API
+#     (`/v1/responses` — hermes_cli/providers.py: openai-api → transport
+#     codex_responses). Our loopback cig-adapter serves ONLY
+#     `/v1/chat/completions` → every buffer-agent model call 404s
+#     ("Provider said: HTTP 404: not found: /v1/responses", found live in
+#     the Oct-23 E2E). `model.api_mode: chat_completions` is the upstream
+#     pin (runtime_provider.explicit_api_mode honors a persisted chat mode
+#     unconditionally; only codex_responses gets the non-OpenAI-endpoint
+#     ignore) — so the block carries it and every boot re-pins it.
 #     Sed-free read/printf/mv per v9 Fred restrictions (no GNU sed -i, no
 #     bare chmod — ownership syscalls EPERM).
 if [ ! -f "$CONFIG_FILE" ] || grep -q "Managed by hermes-hosted" "$CONFIG_FILE"; then
@@ -129,7 +132,9 @@ if [ ! -f "$CONFIG_FILE" ] || grep -q "Managed by hermes-hosted" "$CONFIG_FILE";
   [ -n "$_NAME_SAFE" ] || _NAME_SAFE="Hermes"
 cat > "$CONFIG_FILE" <<EOF
 # Managed by hermes-hosted (installhermes.ai) — regenerated at boot.
-model: "${DEFAULT_MODEL}"
+model:
+  default: "${DEFAULT_MODEL}"
+  api_mode: chat_completions
 
 personality:
   name: "${_NAME_SAFE}"
@@ -145,7 +150,7 @@ EOF
   if [ -n "$_PY" ] \
      && ! "$_PY" -c 'import sys, yaml; yaml.safe_load(open(sys.argv[1]))' "$CONFIG_FILE" 2>/dev/null; then
     echo "[installhermes] WARNING: fresh config failed YAML validation — falling back to model-only config"
-    printf 'model: "%s"\n' "$DEFAULT_MODEL" > "$CONFIG_FILE"
+    printf 'model:\n  default: "%s"\n  api_mode: chat_completions\n' "$DEFAULT_MODEL" > "$CONFIG_FILE"
   fi
   chown hermes:hermes "$CONFIG_FILE" 2>/dev/null || true
 else
@@ -180,13 +185,13 @@ else
         # v9.3.0 flattened the header but left the children).
         "model:"|"model: "*|"model:$_TAB"*)
           if [ "$_SEEN_MODEL" = 0 ]; then
-            printf 'model: "%s"\n' "$DEFAULT_MODEL"
+            printf 'model:\n  default: "%s"\n  api_mode: chat_completions\n' "$DEFAULT_MODEL"
           fi
           _SEEN_MODEL=1; _SKIP_BLOCK=1 ;;
         *) printf '%s\n' "$_line" ;;
       esac
     done < "$CONFIG_FILE"
-    [ "$_SEEN_MODEL" = 1 ] || printf 'model: "%s"\n' "$DEFAULT_MODEL"
+    [ "$_SEEN_MODEL" = 1 ] || printf 'model:\n  default: "%s"\n  api_mode: chat_completions\n' "$DEFAULT_MODEL"
   ) > "$_MODEL_TMP"
   # v9.3.1 (Grok R1 finding #2): validate the CANDIDATE before it goes live.
   # PyYAML lives in the hermes venv, not necessarily the system python —
