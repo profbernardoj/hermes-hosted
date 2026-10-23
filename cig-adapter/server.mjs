@@ -110,6 +110,13 @@ async function forward(req, res, path) {
   };
   // Forward Accept so streaming requests keep their SSE semantics end-to-end.
   if (req.headers['accept']) headers['Accept'] = req.headers['accept'];
+  // D4 container binding (2026-10-23): cig-inference requires X-Container-Fqdn
+  // on every call and matches it against the fqdn claim baked into the minted
+  // token. The adapter predates D4 (Oct-22 hardening; the everclaw auth-proxy
+  // already sends it) — without this header every chat turn fails with
+  // 403 invalid_binding. Same env value the mint body uses, so mint and D4
+  // stay in lockstep by construction.
+  if (CONTAINER_FQDN) headers['X-Container-Fqdn'] = CONTAINER_FQDN;
 
   try {
     const upstreamResp = await fetch(upstream, {

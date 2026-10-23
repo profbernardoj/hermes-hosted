@@ -1,5 +1,31 @@
 # Changelog
 
+## 2026.10.23 (v9.3.4 — CRITICAL: adapter forwards X-Container-Fqdn — cig-inference D4 binding 403s every hermes chat turn)
+
+### Incident
+- **Every hermes chat turn fails at the CIG with `403 invalid_binding`** after
+  v9.3.3 let model calls reach the inference gateway at all (stacked bug,
+  found in the Oct-23 live E2E): `cig-inference` enforces the D4 container
+  binding — every inference call must carry `X-Container-Fqdn` matching the
+  fqdn claim baked into the minted token. The everclaw auth-proxy already
+  sends it; the hermes cig-adapter was written before D4 existed (Oct-20,
+  pre-dating the Oct-22 hardening) and forwarded only
+  Content-Type/Authorization/Accept.
+- Timeline: last successful hermes usage Oct 22 21:54 CDT; the D4 check landed
+  with the Oct-22 security hardening — no hermes chat could have worked since,
+  regardless of image version.
+- Reproduced and fix-proven live on the test deployment (openclaw-8906dc8):
+  mint + inference WITHOUT the header → `HTTP 403
+  {"error":{"message":"invalid_binding"}}`; WITH the header → `HTTP 200`,
+  full completion + billed usage_logs row (deepseek-v4-flash-0731, 23/2
+  tokens, status success).
+
+### Fixed
+- `cig-adapter/server.mjs` `forward()`: send `X-Container-Fqdn:
+  $CIG_CONTAINER_FQDN` on every proxied call (models + chat completions).
+  The header uses the same env value the mint body uses, so the mint fqdn and
+  the D4 check stay in lockstep by construction.
+
 ## 2026.10.23 (v9.3.3 — CRITICAL: pin api_mode chat_completions — hermes v0.22.2 calls /v1/responses on custom endpoints)
 
 ### Incident
