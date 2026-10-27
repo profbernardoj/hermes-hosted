@@ -1,5 +1,24 @@
 # Changelog
 
+## 2026.10.27 (login parity: auth-proxy modal follows Privy dashboard methods)
+
+### Fixed
+- `auth-proxy/login-app.jsx`: removed the hardcoded
+  `loginMethods: ['wallet', 'google', 'email', 'apple']` from the
+  PrivyProvider config. The agent login modal now renders the methods
+  enabled on the InstallHermes Privy app (email, wallet, Google, X,
+  GitHub, Discord, passkey) — server-driven, same mechanism as the
+  InstallHermes.AI and InstallOpenClaw.xyz main sites.
+- Bug class fixed: config drift between the hardcoded list and the Privy
+  dashboards — the Apple button rendered but `apple_oauth` is disabled
+  (dead button), and X/GitHub/Discord were never offered at the agent URL,
+  so users who signed up with those methods on the main site could not
+  sign in to their agent.
+- Companion changes (InstallHermes Privy app flags enabled server-side;
+  Lovable frontend loginMethods list + copy update) tracked in
+  `memory/projects/installhermes/privy-login-parity-2026-10-27/` (SOP-001
+  record; everclaw monorepo carries the same fix + drift-guard tests).
+
 ## 2026.10.23 (v9.3.4 — CRITICAL: adapter forwards X-Container-Fqdn — cig-inference D4 binding 403s every hermes chat turn)
 
 ### Incident
