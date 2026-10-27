@@ -154,7 +154,10 @@ function App() {
       appId={PRIVY_APP_ID}
       {...(PRIVY_CLIENT_ID ? { clientId: PRIVY_CLIENT_ID } : {})}
       config={{
-        loginMethods: ['wallet', 'google', 'email', 'apple'],
+        // loginMethods intentionally NOT set: the Privy modal follows the app's
+        // dashboard-enabled methods (server-driven), so the hermes agent login
+        // offers exactly what the InstallHermes Privy app allows. A hardcoded
+        // list here drifted from the dashboard (dead Apple button, no socials).
         externalWallets: {
           ethereum: {
             connectors: ['metaMask', 'walletConnect', 'coinbaseWallet', 'rainbow', 'injected'],
